@@ -77,7 +77,15 @@ if [[ -n ${script_dir} && -f ${script_dir}/src/main.sh ]]; then
 else
   tmp=$(mktemp /tmp/sbqd.XXXXXX)
   cleanup_paths+=("${tmp}")
-  url="https://github.com/${REPO}/releases/latest/download/sbqd.sh"
+  # 解析最新 tag，避免 latest 下载地址的 CDN 缓存拿到旧版本
+  release_tag=$(curl -fsSL --max-time 10 \
+    "https://api.github.com/repos/${REPO}/releases/latest" 2> /dev/null |
+    sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1) || release_tag=''
+  if [[ -n ${release_tag} ]]; then
+    url="https://github.com/${REPO}/releases/download/${release_tag}/sbqd.sh"
+  else
+    url="https://github.com/${REPO}/releases/latest/download/sbqd.sh"
+  fi
   info '下载最新版本 / downloading latest release'
   if ! curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 -o "${tmp}" "${url}"; then
     info 'GitHub 直连失败，尝试镜像 / retrying with mirror'

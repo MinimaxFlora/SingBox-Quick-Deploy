@@ -54,6 +54,7 @@ CI 会以 `shfmt -d -i 2 -ci -sr` 与 shellcheck 为准。
 
 | 脚本 | 说明 |
 | --- | --- |
+| `tests/bats/*.bats` | 纯函数、状态、链接与配置结构的 bats 单元测试 |
 | `tests/run-smoke.sh` | 状态层与工具函数 |
 | `tests/run-config.sh` | 用真实 sing-box 校验配置（需二进制） |
 | `tests/run-share.sh` | URI / 订阅 / 构建 |

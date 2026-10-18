@@ -54,6 +54,11 @@ jobs:
           bash tests/run-share.sh
           bash tests/run-subserver.sh
 
+      - name: Run bats
+        run: |
+          git clone --depth 1 https://github.com/bats-core/bats-core /tmp/bats-core
+          /tmp/bats-core/bin/bats tests/bats
+
   build:
     name: build single file
     needs: [lint, test]

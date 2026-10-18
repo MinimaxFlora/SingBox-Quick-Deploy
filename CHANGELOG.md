@@ -3,6 +3,13 @@
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [2.0.2] - 2026-10-18
+
+### 修复
+
+- GitHub API 不可用时，内核下载回退到固定版本 `1.14.3`，不再直接失败。
+- 卸载时只在单文件安装模式下删除 `/usr/local/bin/sbqd`，避免误删源码目录里的入口。
+
 ## [2.0.1] - 2026-10-18
 
 ### 变更

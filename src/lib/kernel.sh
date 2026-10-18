@@ -51,11 +51,13 @@ kernel_asset_digest() {
 # 安装指定版本（默认最新），会覆盖现有二进制
 kernel_install() {
   local version=${1:-}
+  local fallback='1.14.3'
   if [[ -z ${version} ]]; then
     version=$(kernel_latest_version)
     if [[ -z ${version} ]]; then
-      sbqd_die "$(sbqd_t '无法获取 sing-box 最新版本，请检查网络或手动指定版本' \
-        'cannot resolve latest sing-box version, check network or pass a version')"
+      sbqd_warn "$(sbqd_t '无法查询最新版本，回退到 %s' \
+        'cannot query the latest version, falling back to %s' "${fallback}")"
+      version=${fallback}
     fi
   fi
 

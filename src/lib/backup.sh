@@ -144,7 +144,8 @@ sbqd_uninstall() {
     sbqd_info "$(sbqd_t '已保留 %s 与 %s' 'kept %s and %s' "${SBQD_ETC}" "${SINGBOX_CONFIG_DIR}")"
   fi
 
-  if [[ -f ${SBQD_SELF:-} ]]; then
+  if [[ -n ${SBQD_EMBEDDED_SUBSERVER:-} && -n ${SBQD_SELF:-} && -f ${SBQD_SELF} &&
+    ${SBQD_SELF} == "${SBQD_BIN_DIR}/sbqd" ]]; then
     rm -f -- "${SBQD_SELF}"
   fi
   systemctl daemon-reload 2> /dev/null || true

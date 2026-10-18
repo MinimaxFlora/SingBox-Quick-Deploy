@@ -538,6 +538,10 @@ sbqd_main() {
           return 1
         fi
       fi
+      if ! state_exists; then
+        sbqd_err "$(sbqd_t '安装未完成，已退出' 'installation incomplete, exiting')"
+        return 1
+      fi
       sbqd_lock
       sbqd_menu_main
       return 0

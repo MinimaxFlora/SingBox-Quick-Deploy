@@ -3,6 +3,23 @@
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.1.1] - 2026-10-18
+
+### 修复
+
+- 证书目录归属 `root:sing-box`，避免 sing-box 以非 root 运行时无法读取证书。
+- 订阅目录与文件统一设置 `sbqd-sub` 组权限，修复订阅服务读不到生成文件。
+- 无 git tag 时构建版本回退到 `VERSION` 文件（修复 CI 构建断言）。
+- 订阅服务重新配置端口前先停止旧实例，避免误判端口占用。
+- 订阅面板显示完整 URL，并在日志中隐藏 Token。
+- Quantumult X 导出时清理节点名中的空格、逗号与斜杠。
+
+### 变更
+
+- `install.sh` 在 Release 下载失败时自动回退到源码构建。
+- 仅修改节点名称时也会刷新订阅文件。
+- 安装失败后不再进入空状态菜单。
+
 ## [0.1.0] - 2026-10-18
 
 首个可用版本。

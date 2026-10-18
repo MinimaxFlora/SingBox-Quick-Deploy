@@ -139,6 +139,10 @@ subserver_enable() {
     sbqd_err "$(sbqd_t '端口不合法：%s' 'invalid port: %s' "${port}")"
     return 1
   fi
+  # 重新配置端口时先停掉旧实例，避免端口占用误判
+  if systemctl is-active --quiet sbqd-sub 2> /dev/null; then
+    systemctl stop sbqd-sub 2> /dev/null || true
+  fi
   if sbqd_port_in_use "${port}" tcp; then
     sbqd_err "$(sbqd_t '端口 %s 已被占用' 'port %s is already in use' "${port}")"
     return 1

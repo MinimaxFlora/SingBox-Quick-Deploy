@@ -104,6 +104,9 @@ bash -n "${tmp}" || die '脚本语法校验失败 / syntax check failed'
 info '安装到 / installing to '"${TARGET}"
 install -m 755 "${tmp}" "${TARGET}"
 
+cleanup
+trap - EXIT
+
 if ((${#SBQD_ARGS[@]})); then
   exec "${TARGET}" install "${SBQD_ARGS[@]}"
 fi

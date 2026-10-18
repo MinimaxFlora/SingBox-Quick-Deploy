@@ -1,0 +1,11 @@
+dist/
+build/.cache/
+tests/tmp/
+tests/fixtures/generated/
+__pycache__/
+*.pyc
+*.log
+*.tmp
+.DS_Store
+.idea/
+.vscode/

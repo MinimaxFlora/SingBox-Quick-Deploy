@@ -1,0 +1,34 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: publish single-file release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: bash build/build.sh "${GITHUB_REF_NAME#v}"
+
+      - name: Verify
+        run: |
+          bash dist/sbqd.sh --version
+          bash -n dist/sbqd.sh
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "dist/sbqd.sh#sbqd.sh" \
+            "dist/sbqd.sh.sha256#sbqd.sh.sha256" \
+            --title "SingBox-Quick-Deploy ${GITHUB_REF_NAME}" \
+            --generate-notes

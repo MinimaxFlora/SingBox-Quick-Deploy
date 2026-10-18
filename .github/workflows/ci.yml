@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: shellcheck + shfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y shellcheck
+
+      - name: ShellCheck
+        run: shellcheck -x -S warning src/lib/*.sh src/main.sh build/*.sh install.sh tests/*.sh
+
+      - name: shfmt
+        run: |
+          curl -fsSL -o /tmp/shfmt https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64
+          chmod +x /tmp/shfmt
+          /tmp/shfmt -d -i 2 -ci -sr src build install.sh tests
+
+  test:
+    name: integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y jq openssl curl qrencode
+
+      - name: Download sing-box
+        run: |
+          curl -fsSL -o sb.tgz https://github.com/SagerNet/sing-box/releases/download/v1.14.3/sing-box-1.14.3-linux-amd64.tar.gz
+          tar -xzf sb.tgz
+          printf 'SBQD_TEST_SINGBOX=%s\n' "${PWD}/sing-box-1.14.3-linux-amd64/sing-box" >>"${GITHUB_ENV}"
+
+      - name: Run tests
+        run: |
+          bash tests/run-smoke.sh
+          bash tests/run-config.sh
+          bash tests/run-share.sh
+          bash tests/run-subserver.sh
+
+  build:
+    name: build single file
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: bash build/build.sh
+
+      - name: Smoke test artifact
+        run: |
+          bash dist/sbqd.sh --version
+          bash dist/sbqd.sh --help
+          bash -n dist/sbqd.sh
+          cat dist/sbqd.sh.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbqd
+          path: |
+            dist/sbqd.sh
+            dist/sbqd.sh.sha256
+          retention-days: 14

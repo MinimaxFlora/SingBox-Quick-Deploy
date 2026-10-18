@@ -120,8 +120,9 @@ lines=$(base64 -d "${SBQD_SUB_DIR}/links.base64" | grep -c '://')
 printf 'publish_ok lines=%s\n' "${lines}"
 
 printf '\n=== single-file build ===\n'
+version=$(tr -d '[:space:]' < VERSION)
 bash build/build.sh > /dev/null
-bash dist/sbqd.sh --version | grep -q '^sbqd 0\.1\.0$'
+bash dist/sbqd.sh --version | grep -qx "sbqd ${version}"
 bash dist/sbqd.sh --help | grep -qi 'usage'
 printf 'build_ok\n'
 

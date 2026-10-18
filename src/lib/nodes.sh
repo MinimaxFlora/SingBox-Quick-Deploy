@@ -503,11 +503,21 @@ nodes_set_name() {
 }
 
 nodes_rotate() {
-  local id=$1 node type params
+  local id=$1 node type params server tls_mode pin
   nodes_require_node "${id}" || return 1
   node=$(state_node_json "${id}")
   type=$(jq -r '.type' <<< "${node}")
+  server=$(jq -r '.server // .domain // empty' <<< "${node}")
+  tls_mode=$(jq -r '.tls_mode // empty' <<< "${node}")
   params=$(nodes_generate_params "${type}") || return 1
+
+  # Hysteria2 自签模式重新写入证书指纹
+  if [[ ${type} == 'hysteria2' && ${tls_mode} == 'selfsigned' && -n ${server} ]]; then
+    pin=$(cert_selfsigned_pin "${server}" 2> /dev/null) || pin=''
+    if [[ -n ${pin} ]]; then
+      params=$(jq -c --arg pin "${pin}" '.pin = $pin' <<< "${params}")
+    fi
+  fi
 
   cp -f -- "${SBQD_STATE_FILE}" "${SBQD_TMP}/state-before-rotate.json"
   state_update '.nodes = [.nodes[] | if .id == $id then .params = $p else . end]' \
@@ -525,10 +535,10 @@ nodes_rotate() {
 nodes_choose_type() {
   ui_section "$(sbqd_t '选择协议' 'Choose protocol')"
   ui_item 1 'VLESS + TCP + Reality + Vision' 'TCP · 无需域名'
-  ui_item 2 'Hysteria2' 'UDP · 需要域名'
-  ui_item 3 'AnyTLS' 'TCP · 需要域名'
-  ui_item 4 'TUIC v5' 'UDP · 需要域名'
-  ui_item 5 'VMess + TLS + WebSocket' 'TCP · 需要域名'
+  ui_item 2 'Hysteria2' 'UDP · 自签或域名'
+  ui_item 3 'AnyTLS' 'TCP · 自签或域名'
+  ui_item 4 'TUIC v5' 'UDP · 自签或域名'
+  ui_item 5 'VMess + TLS + WebSocket' 'TCP · 自签或域名'
   ui_item 0 "$(sbqd_t '返回' 'Back')" ''
   ui_ask
   case ${REPLY} in

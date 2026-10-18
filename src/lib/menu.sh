@@ -37,12 +37,14 @@ sbqd_banner_geto() {
     ips=${SBQD_BANNER_IPS}
   fi
 
-  printf '%s当前检测到信息%s\n' "${SBQD_C_BOLD}" "${SBQD_C_RESET}"
-  printf '操作系统：%s\n' "${SBQD_OS_PRETTY:-unknown}"
-  printf '服务器IP：%s\n' "${ips:-未检测到}"
+  printf '%s\n' "$(sbqd_t '当前检测到信息' 'Current environment')"
+  printf '%s\n' "$(sbqd_t '操作系统：%s' 'OS: %s' "${SBQD_OS_PRETTY:-unknown}")"
+  printf '%s\n' "$(sbqd_t '服务器IP：%s' 'Server IP: %s' "${ips:-未检测到}")"
   printf '%s--------------------------------------------------%s\n' "${SBQD_C_DIM}" "${SBQD_C_RESET}"
-  printf '当前版本：v%s     sing-box：%s（%s）\n' "${SBQD_VERSION}" "${kernel}" "${service}"
-  printf '节点：%s/%s    域名：%s    订阅：%s\n' "${enabled}" "${nodes}" "${domains}" "${sub}"
+  printf '%s\n' "$(sbqd_t '当前版本：v%s     sing-box：%s（%s）' \
+    'Version: v%s     sing-box: %s (%s)' "${SBQD_VERSION}" "${kernel}" "${service}")"
+  printf '%s\n' "$(sbqd_t '节点：%s/%s    域名：%s    订阅：%s' \
+    'Nodes: %s/%s    Domains: %s    Subscription: %s' "${enabled}" "${nodes}" "${domains}" "${sub}")"
   printf '%s--------------------------------------------------%s\n' "${SBQD_C_DIM}" "${SBQD_C_RESET}"
 }
 
@@ -643,24 +645,25 @@ sbqd_menu_main() {
   local choice
   while :; do
     sbqd_banner_geto
-    printf '\n%s安装（可共存，一次装一种）%s\n' "${SBQD_C_BOLD}" "${SBQD_C_RESET}"
-    printf '  1) VLESS + TCP + Reality + Vision      直连（最推荐）\n'
-    printf '  2) Hysteria2                           UDP 加速\n'
-    printf '  3) AnyTLS                              TCP 伪装\n'
-    printf '  4) TUIC v5                             UDP 低延迟\n'
-    printf '  5) VMess + TLS + WebSocket             兼容性最好\n'
-    printf '\n%s中转%s\n' "${SBQD_C_BOLD}" "${SBQD_C_RESET}"
-    printf '  6) 添加中转（SOCKS5 / Shadowsocks）\n'
-    printf '\n%s管理%s\n' "${SBQD_C_BOLD}" "${SBQD_C_RESET}"
-    printf '  7) 查看节点 / 链接 / 二维码\n'
-    printf '  8) 域名与证书（acme.sh）\n'
-    printf '  9) 订阅与导出\n'
-    printf ' 10) 设置\n'
-    printf ' 11) 系统状态 / 日志 / 备份\n'
-    printf ' 12) 卸载\n'
-    printf '  0) 退出\n'
-    printf '  关闭 SSH 后，输入 sbqd 可重新打开菜单\n'
-    printf '\n请输入选项: '
+    printf '\n%s%s%s\n' "${SBQD_C_BOLD}" \
+      "$(sbqd_t '安装（可共存，一次装一种）' 'Install (co-exist, one at a time)')" "${SBQD_C_RESET}"
+    printf '  1) VLESS + TCP + Reality + Vision      %s\n' "$(sbqd_t '直连（最推荐）' 'direct (recommended)')"
+    printf '  2) Hysteria2                           %s\n' "$(sbqd_t 'UDP 加速' 'UDP acceleration')"
+    printf '  3) AnyTLS                              %s\n' "$(sbqd_t 'TCP 伪装' 'TCP camouflage')"
+    printf '  4) TUIC v5                             %s\n' "$(sbqd_t 'UDP 低延迟' 'low-latency UDP')"
+    printf '  5) VMess + TLS + WebSocket             %s\n' "$(sbqd_t '兼容性最好' 'best compatibility')"
+    printf '\n%s%s%s\n' "${SBQD_C_BOLD}" "$(sbqd_t '中转' 'Relay')" "${SBQD_C_RESET}"
+    printf '  6) %s\n' "$(sbqd_t '添加中转（SOCKS5 / Shadowsocks）' 'Add upstream (SOCKS5 / Shadowsocks)')"
+    printf '\n%s%s%s\n' "${SBQD_C_BOLD}" "$(sbqd_t '管理' 'Manage')" "${SBQD_C_RESET}"
+    printf '  7) %s\n' "$(sbqd_t '查看节点 / 链接 / 二维码' 'Nodes / links / QR')"
+    printf '  8) %s\n' "$(sbqd_t '域名与证书（acme.sh）' 'Domains & certificates (acme.sh)')"
+    printf '  9) %s\n' "$(sbqd_t '订阅与导出' 'Subscription & export')"
+    printf ' 10) %s\n' "$(sbqd_t '设置' 'Settings')"
+    printf ' 11) %s\n' "$(sbqd_t '系统状态 / 日志 / 备份' 'System / logs / backup')"
+    printf ' 12) %s\n' "$(sbqd_t '卸载' 'Uninstall')"
+    printf '  0) %s\n' "$(sbqd_t '退出' 'Exit')"
+    printf '  %s\n' "$(sbqd_t '关闭 SSH 后，输入 sbqd 可重新打开菜单' 'Run sbqd to reopen this menu after reconnecting')"
+    printf '\n%s' "$(sbqd_t '请输入选项: ' 'Select: ')"
 
     if ! IFS= read -r choice; then
       exit 0

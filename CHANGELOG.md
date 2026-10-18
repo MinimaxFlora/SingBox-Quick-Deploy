@@ -3,6 +3,19 @@
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [2.0.1] - 2026-10-18
+
+### 变更
+
+- 主菜单与状态头支持中英双语（`--lang en`）。
+- `sbqd install --yes` 不再进入菜单，直接输出安装摘要。
+- 交互输入在基础安装前就切回 `/dev/tty`，避免 `curl | bash` 时依赖安装抢走输入。
+
+### 修复
+
+- Hysteria2 自签节点重置密钥后丢失 `pinSHA256`。
+- 旧版节点选择提示仍写着“需要域名”，改为“自签或域名”。
+
 ## [2.0.0] - 2026-10-18
 
 按 geto.im oneclick 的交互重写，核心变化是 **IP 直连优先**。

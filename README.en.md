@@ -41,7 +41,7 @@ Current environment
 OS: Debian GNU/Linux 12 (bookworm)
 Server IP: 203.0.113.10
 --------------------------------------------------
-Version: v2.0.0     sing-box: 1.14.3 (running)
+Version: v2.0.1     sing-box: 1.14.3 (running)
 Nodes: 2/2    Domains: 0    Subscription: running
 --------------------------------------------------
 

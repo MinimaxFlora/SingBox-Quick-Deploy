@@ -1,37 +1,36 @@
 # 使用手册
 
-本文覆盖从安装到日常运维的完整流程。所有操作都可以在 TUI 菜单完成，也可以使用文末的非交互命令。
+本文覆盖从安装到日常运维的完整流程。所有操作都可以在菜单完成，也可以使用文末的非交互命令。
+
+> **v2 起**：TLS 协议默认使用 IP 自签证书，**不需要域名**；本文第 2 章仅在你想使用域名证书时需要。
 
 ## 1. 安装
 
 ### 1.1 一键安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MinimaxFlora/SingBox-Quick-Deploy/main/install.sh | bash
+bash <(curl -fsSL https://raw.githubusercontent.com/MinimaxFlora/SingBox-Quick-Deploy/main/install.sh)
 ```
 
-脚本会：
+也支持 `curl ... | bash`，脚本会把交互输入切回终端。
 
-1. 检查 root、systemd、发行版与架构；
-2. 安装 curl、jq、openssl、python3、qrencode、socat 等依赖；
-3. 从 GitHub Release 下载单文件版本并安装到 `/usr/local/bin/sbqd`；
-4. 进入首次配置向导（语言 → 域名 → 第一个节点 → 订阅）。
+安装脚本会：
 
-首次运行会创建：
+1. 下载单文件版本到 `/usr/local/bin/sbqd`；
+2. 执行 `sbqd install`：检查 root / systemd / 架构，安装依赖与 sing-box，写入 systemd 服务；
+3. **直接进入主菜单**，不需要额外的初始化向导。
 
-- `/etc/sbqd/state.json`（600）
-- `/etc/sing-box/config.json`
-- `sing-box.service`
-- 系统用户 `sing-box`
+### 1.2 第一次安装节点
 
-### 1.2 首次配置向导
+1. 在主菜单选择 `1`-`5` 中的协议；
+2. 选择 IP（单 IP 自动跳过；多 IP 支持 `0` 全部、`1-2`、`1,3`）；
+3. 选择安装模式：
+   - `1) 快速`：随机端口、自签证书、随机 Reality 伪装目标；
+   - `2) 自定义`：可填端口、名称、域名（留空=自签）、Reality 伪装目标；
+4. 脚本自动生成密钥、写配置、`sing-box check`、热重载；
+5. 每个节点立即输出二维码、分享链接与订阅地址。
 
-1. **语言**：中文 / English，之后可在「设置」切换。
-2. **域名**（可选）：需要 TLS 协议时再配置也可以。
-3. **第一个节点**：Reality 不需要域名，适合先验证连通性。
-4. **订阅服务**：默认随机端口、HTTP；有域名时可启用 HTTPS。
-
-安装完成后运行 `sbqd` 进入菜单。
+TLS 协议选择域名时，脚本会校验该域名已在「域名与证书」中签发；否则报错并提示先添加域名。
 
 ### 1.3 支持的发行版
 
@@ -90,11 +89,11 @@ ACME 邮箱：you@example.com
 
 ### 3.1 添加节点
 
-菜单：**节点管理 → 添加节点**，选择协议后填写：
+菜单：主菜单选择 `1`-`5` 中的协议，选择 IP 后填写：
 
-- 节点名称（默认 `<协议>-<序号>`）
+- 节点名称（默认 `<协议>-<端口>`，可改）
 - 端口（默认随机高端口，可改）
-- 域名（TLS 类协议必填，从已托管域名中选择）
+- 域名（可选；留空使用自签证书，填写则使用已签发域名证书）
 - 中转上游（可选）
 - Reality 伪装目标（仅 Reality）
 
@@ -300,8 +299,11 @@ sbqd uninstall [--purge]              卸载
 # 添加 Reality 节点并绑定 1 号上游
 sbqd node add --type vless-reality --name HK --port 28443 --upstream 1
 
-# 添加 Hysteria2 节点（域名必须已签发）
-sbqd node add --type hysteria2 --name JP --domain jp.example.com
+# 添加 Hysteria2 节点：IP 直连 + 自签证书
+sbqd node add --type hysteria2 --name JP --server 203.0.113.10 --tls-mode selfsigned
+
+# 添加 TUIC 节点：使用已签发域名证书
+sbqd node add --type tuic --name US --server 203.0.113.10 --domain us.example.com
 
 # 机器可读状态
 sbqd status --json | jq '.nodes'

@@ -126,7 +126,7 @@ cmd_node() {
 }
 
 cmd_node_add() {
-  local type='' name='' port='' domain='' upstream=0 handshake=''
+  local type='' name='' port='' domain='' upstream=0 handshake='' server='' tls_mode=''
   while (($#)); do
     case $1 in
       --type)
@@ -153,6 +153,14 @@ cmd_node_add() {
         handshake=${2:-}
         shift 2
         ;;
+      --server)
+        server=${2:-}
+        shift 2
+        ;;
+      --tls-mode)
+        tls_mode=${2:-}
+        shift 2
+        ;;
       *) sbqd_err "$(sbqd_t '未知参数：%s' 'unknown argument: %s' "$1")" && return 1 ;;
     esac
   done
@@ -160,9 +168,9 @@ cmd_node_add() {
     sbqd_err "$(sbqd_t '缺少 --type' 'missing --type')"
     return 1
   }
-  SBQD_NODE_HANDSHAKE=${handshake:-www.microsoft.com}
-  sbqd_require_state_cmd
-  nodes_create "${type}" "${name}" "${port}" "${domain}" "${upstream}"
+  SBQD_NODE_HANDSHAKE=${handshake:-$(nodes_random_handshake)}
+  sbqd_ensure_base
+  nodes_create "${type}" "${name}" "${port}" "${domain}" "${upstream}" "${server}" "${tls_mode}"
 }
 
 cmd_node_list() {
@@ -530,18 +538,6 @@ sbqd_main() {
     if [[ -t 0 && -t 1 ]]; then
       sbqd_require_root
       detect_all
-      if ! state_exists; then
-        if sbqd_confirm '尚未安装，现在安装？' 'not installed yet, install now?' 'y'; then
-          sbqd_lock
-          sbqd_install
-        else
-          return 1
-        fi
-      fi
-      if ! state_exists; then
-        sbqd_err "$(sbqd_t '安装未完成，已退出' 'installation incomplete, exiting')"
-        return 1
-      fi
       sbqd_lock
       sbqd_menu_main
       return 0

@@ -11,10 +11,10 @@ cd -- "${ROOT}"
 
 VERSION=${1:-}
 if [[ -z ${VERSION} ]]; then
-  if VERSION=$(git describe --tags --abbrev=0 2> /dev/null); then
-    VERSION=${VERSION#v}
-  elif [[ -f VERSION ]]; then
+  if [[ -f VERSION ]]; then
     VERSION=$(tr -d '[:space:]' < VERSION)
+  elif VERSION=$(git describe --tags --abbrev=0 2> /dev/null); then
+    VERSION=${VERSION#v}
   else
     VERSION='0.1.0'
   fi

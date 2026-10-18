@@ -276,3 +276,21 @@ CI 在 Ubuntu 上安装 shellcheck、shfmt 与 sing-box 1.14.3 后执行全部�
 4. 在 `nodes.sh` 的 `nodes_type_*` 增加类型元数据；
 5. 更新 `state_validate` 白名单、菜单与文档；
 6. 在 `tests/run-config.sh` 与 `tests/run-share.sh` 增加断言。
+
+## 10. v2 状态模型补充
+
+v2 在 schema 2 中为节点增加三个字段：
+
+| 字段 | 取值 | 说明 |
+| --- | --- | --- |
+| `server` | IP 或域名 | 对外通告地址，分享链接使用 |
+| `domain` | 空或域名 | 仅域名证书模式使用 |
+| `tls_mode` | `reality` / `domain` / `selfsigned` | 决定证书来源与客户端参数 |
+| `listen` | `::` / `0.0.0.0` | 监听地址 |
+
+- 自签证书：`/etc/sing-box/cert/selfsigned/<地址>/`，`CN=<地址>`，`subjectAltName=IP/DNS:<地址>`；
+- Hysteria2 自签节点在 `params.pin` 保存 SHA-256 指纹；
+- 分享层根据 `tls_mode` 自动写入 `insecure=1` / `allow_insecure=1` / `skip-cert-verify: true`；
+- `state_migrate` 会把 schema 1 节点补成 schema 2：有域名的保持 `domain`，无域名的 TLS 节点转为 `selfsigned`。
+
+安装流程改为惰性：`sbqd_ensure_base` 在第一次安装协议时执行依赖、内核、服务初始化，之后由 `SBQD_BASE_READY` 避免重复。

@@ -2,6 +2,7 @@ dist/
 build/.cache/
 tests/tmp/
 tests/fixtures/generated/
+ref/
 __pycache__/
 *.pyc
 *.log

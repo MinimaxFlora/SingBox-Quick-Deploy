@@ -1,8 +1,8 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2154,SC2016
 # =============================================================================
-#  cert.sh · 域名与证书（acme.sh HTTP-01）
-#  约束：仅使用 HTTP-01 standalone（需要 80 端口可达），不实现 DNS API
+#  cert.sh · 证书
+#  两条路径：acme.sh HTTP-01（域名）/ 自签证书（IP 直连，客户端 insecure）
 # =============================================================================
 
 cert_dir() {
@@ -252,4 +252,83 @@ cert_list_lines() {
     days=$(sbqd_days_left "${expires}")
     printf '%s|%s|%s\n' "${domain}" "${expires}" "${days}"
   done < <(state_domain_names)
+}
+
+# --- 自签证书（IP 直连 / 无域名） ------------------------------------------
+# 目录：/etc/sing-box/cert/selfsigned/<safe-address>/
+cert_selfsigned_dir() {
+  local safe=${1//[^A-Za-z0-9._-]/_}
+  printf '%s/selfsigned/%s' "${SINGBOX_CERT_DIR}" "${safe}"
+}
+
+cert_selfsigned_fullchain() {
+  printf '%s/fullchain.pem' "$(cert_selfsigned_dir "$1")"
+}
+
+cert_selfsigned_key() {
+  printf '%s/privkey.pem' "$(cert_selfsigned_dir "$1")"
+}
+
+cert_selfsigned_ok() {
+  local address=$1 fullchain key
+  fullchain=$(cert_selfsigned_fullchain "${address}")
+  key=$(cert_selfsigned_key "${address}")
+  [[ -s ${fullchain} && -s ${key} ]]
+}
+
+# 生成（或复用）指定 IP / 域名的自签证书，SAN 与访问地址一致
+cert_selfsigned_ensure() {
+  local address=$1
+  local dir fullchain key san
+
+  if ! sbqd_is_ipv4 "${address}" && ! sbqd_is_ipv6 "${address}" && ! sbqd_is_domain "${address}"; then
+    sbqd_err "$(sbqd_t '无法为无效地址生成证书：%s' 'cannot issue certificate for invalid address: %s' "${address}")"
+    return 1
+  fi
+
+  dir=$(cert_selfsigned_dir "${address}")
+  fullchain=$(cert_selfsigned_fullchain "${address}")
+  key=$(cert_selfsigned_key "${address}")
+
+  if [[ -s ${fullchain} && -s ${key} ]]; then
+    chmod 640 "${fullchain}" "${key}" 2> /dev/null || true
+    chown "root:${SINGBOX_USER}" "${fullchain}" "${key}" 2> /dev/null || true
+    return 0
+  fi
+
+  mkdir -p -- "${dir}"
+  chmod 750 "${dir}" 2> /dev/null || true
+  chown "root:${SINGBOX_USER}" "${dir}" 2> /dev/null || true
+
+  if sbqd_is_ipv4 "${address}" || sbqd_is_ipv6 "${address}"; then
+    san="IP:${address}"
+  else
+    san="DNS:${address}"
+  fi
+
+  if ! openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
+    -days 3650 -keyout "${key}" -out "${fullchain}" \
+    -subj "/CN=${address}" -addext "subjectAltName=${san}" > /dev/null 2>&1; then
+    sbqd_err "$(sbqd_t '生成自签证书失败：%s' 'failed to generate self-signed certificate: %s' "${address}")"
+    return 1
+  fi
+
+  chown "root:${SINGBOX_USER}" "${fullchain}" "${key}" 2> /dev/null || true
+  chmod 640 "${fullchain}" "${key}"
+  sbqd_debug "self-signed certificate ready for ${address}"
+  return 0
+}
+
+# 证书 SHA-256 指纹（小写无冒号），用于 Hysteria2 pinSHA256
+cert_pin_sha256() {
+  local cert=$1 raw
+  [[ -r ${cert} ]] || return 1
+  raw=$(openssl x509 -in "${cert}" -noout -fingerprint -sha256 2> /dev/null) || return 1
+  raw=${raw#*=}
+  raw=${raw//:/}
+  printf '%s' "${raw,,}"
+}
+
+cert_selfsigned_pin() {
+  cert_pin_sha256 "$(cert_selfsigned_fullchain "$1")"
 }

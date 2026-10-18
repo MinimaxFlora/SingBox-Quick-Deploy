@@ -22,13 +22,28 @@ config_cert_file() {
 # 单个节点的 inbound JSON
 config_node_inbound() {
   local node=$1
-  local type id tag domain listen cert key
+  local type id tag domain server tls_mode listen cert key sni host masq
 
   type=$(jq -r '.type' <<< "${node}")
   id=$(jq -r '.id' <<< "${node}")
   tag="${type}-${id}"
   domain=$(jq -r '.domain // empty' <<< "${node}")
-  listen=$(config_listen)
+  server=$(jq -r '.server // .domain // empty' <<< "${node}")
+  tls_mode=$(jq -r '.tls_mode // empty' <<< "${node}")
+  listen=$(jq -r '.listen // empty' <<< "${node}")
+
+  if [[ -z ${listen} ]]; then
+    listen=$(config_listen)
+  fi
+  if [[ -z ${tls_mode} ]]; then
+    if [[ ${type} == 'vless-reality' ]]; then
+      tls_mode='reality'
+    elif [[ -n ${domain} ]]; then
+      tls_mode='domain'
+    else
+      tls_mode='selfsigned'
+    fi
+  fi
 
   case ${type} in
     vless-reality)
@@ -60,28 +75,48 @@ config_node_inbound() {
         }'
       ;;
     hysteria2 | anytls | tuic | vmess-ws)
-      if [[ -z ${domain} ]]; then
-        sbqd_err "$(sbqd_t '节点 %s 缺少域名，无法生成 TLS 配置' \
-          'node %s has no domain, cannot build TLS config' "${tag}")"
-        return 1
+      if [[ ${tls_mode} == 'domain' ]]; then
+        if [[ -z ${domain} ]]; then
+          sbqd_err "$(sbqd_t '节点 %s 为域名模式但缺少域名' \
+            'node %s is in domain mode but has no domain' "${tag}")"
+          return 1
+        fi
+        cert=$(config_cert_file "${domain}" 'fullchain.pem')
+        key=$(config_cert_file "${domain}" 'privkey.pem')
+        sni=${domain}
+      else
+        if [[ -z ${server} ]]; then
+          sbqd_err "$(sbqd_t '节点 %s 缺少 server 地址' \
+            'node %s has no server address' "${tag}")"
+          return 1
+        fi
+        if ! cert_selfsigned_ensure "${server}"; then
+          return 1
+        fi
+        cert=$(cert_selfsigned_fullchain "${server}")
+        key=$(cert_selfsigned_key "${server}")
+        sni=${server}
       fi
-      cert=$(config_cert_file "${domain}" 'fullchain.pem')
-      key=$(config_cert_file "${domain}" 'privkey.pem')
+      host=${domain:-${server}}
+      masq='https://www.bing.com/'
+      if [[ -n ${domain} ]]; then
+        masq="https://${domain}/"
+      fi
 
       case ${type} in
         hysteria2)
           jq -nc --argjson n "${node}" --arg tag "${tag}" --arg listen "${listen}" \
-            --arg domain "${domain}" --arg cert "${cert}" --arg key "${key}" '
+            --arg sni "${sni}" --arg cert "${cert}" --arg key "${key}" --arg masq "${masq}" '
             {
               type: "hysteria2",
               tag: $tag,
               listen: $listen,
               listen_port: ($n.port | tonumber),
               users: [{name: "user", password: $n.params.password}],
-              masquerade: ("https://" + $domain + "/"),
+              masquerade: $masq,
               tls: {
                 enabled: true,
-                server_name: $domain,
+                server_name: $sni,
                 alpn: ["h3"],
                 certificate_path: $cert,
                 key_path: $key
@@ -93,7 +128,7 @@ config_node_inbound() {
           ;;
         anytls)
           jq -nc --argjson n "${node}" --arg tag "${tag}" --arg listen "${listen}" \
-            --arg domain "${domain}" --arg cert "${cert}" --arg key "${key}" '
+            --arg sni "${sni}" --arg cert "${cert}" --arg key "${key}" '
             {
               type: "anytls",
               tag: $tag,
@@ -102,7 +137,7 @@ config_node_inbound() {
               users: [{name: "user", password: $n.params.password}],
               tls: {
                 enabled: true,
-                server_name: $domain,
+                server_name: $sni,
                 certificate_path: $cert,
                 key_path: $key
               }
@@ -110,7 +145,7 @@ config_node_inbound() {
           ;;
         tuic)
           jq -nc --argjson n "${node}" --arg tag "${tag}" --arg listen "${listen}" \
-            --arg domain "${domain}" --arg cert "${cert}" --arg key "${key}" '
+            --arg sni "${sni}" --arg cert "${cert}" --arg key "${key}" '
             {
               type: "tuic",
               tag: $tag,
@@ -126,7 +161,7 @@ config_node_inbound() {
               zero_rtt_handshake: ($n.params.zero_rtt // false),
               tls: {
                 enabled: true,
-                server_name: $domain,
+                server_name: $sni,
                 alpn: ["h3"],
                 certificate_path: $cert,
                 key_path: $key
@@ -135,7 +170,7 @@ config_node_inbound() {
           ;;
         vmess-ws)
           jq -nc --argjson n "${node}" --arg tag "${tag}" --arg listen "${listen}" \
-            --arg domain "${domain}" --arg cert "${cert}" --arg key "${key}" '
+            --arg sni "${sni}" --arg host "${host}" --arg cert "${cert}" --arg key "${key}" '
             {
               type: "vmess",
               tag: $tag,
@@ -145,13 +180,13 @@ config_node_inbound() {
               transport: {
                 type: "ws",
                 path: $n.params.ws_path,
-                headers: {Host: $domain},
+                headers: {Host: $host},
                 max_early_data: 2048,
                 early_data_header_name: "Sec-WebSocket-Protocol"
               },
               tls: {
                 enabled: true,
-                server_name: $domain,
+                server_name: $sni,
                 alpn: ["http/1.1"],
                 certificate_path: $cert,
                 key_path: $key
@@ -281,9 +316,9 @@ config_check() {
   return 0
 }
 
-# 检查所有启用节点的域名/证书是否就绪
+# 检查所有启用节点的证书是否就绪（域名证书或自签）
 config_check_domains() {
-  local node type tag domain fullchain key missing=0
+  local node type tag domain server tls_mode fullchain key missing=0
   while IFS= read -r node; do
     [[ $(jq -r '.enabled' <<< "${node}") == 'true' ]] || continue
     type=$(jq -r '.type' <<< "${node}")
@@ -292,16 +327,37 @@ config_check_domains() {
     fi
     tag="${type}-$(jq -r '.id' <<< "${node}")"
     domain=$(jq -r '.domain // empty' <<< "${node}")
-    if [[ -z ${domain} ]]; then
-      sbqd_err "$(sbqd_t '节点 %s 没有绑定域名' 'node %s has no domain' "${tag}")"
-      missing=1
-      continue
+    server=$(jq -r '.server // .domain // empty' <<< "${node}")
+    tls_mode=$(jq -r '.tls_mode // empty' <<< "${node}")
+    if [[ -z ${tls_mode} ]]; then
+      if [[ -n ${domain} ]]; then
+        tls_mode='domain'
+      else
+        tls_mode='selfsigned'
+      fi
     fi
-    fullchain=$(config_cert_file "${domain}" 'fullchain.pem')
-    key=$(config_cert_file "${domain}" 'privkey.pem')
+
+    if [[ ${tls_mode} == 'domain' ]]; then
+      if [[ -z ${domain} ]]; then
+        sbqd_err "$(sbqd_t '节点 %s 没有绑定域名' 'node %s has no domain' "${tag}")"
+        missing=1
+        continue
+      fi
+      fullchain=$(config_cert_file "${domain}" 'fullchain.pem')
+      key=$(config_cert_file "${domain}" 'privkey.pem')
+    else
+      if [[ -z ${server} ]]; then
+        sbqd_err "$(sbqd_t '节点 %s 缺少 server 地址' 'node %s has no server address' "${tag}")"
+        missing=1
+        continue
+      fi
+      fullchain=$(cert_selfsigned_fullchain "${server}")
+      key=$(cert_selfsigned_key "${server}")
+    fi
+
     if [[ ! -r ${fullchain} || ! -r ${key} ]]; then
       sbqd_err "$(sbqd_t '节点 %s 的证书文件缺失：%s' \
-        'certificate files missing for node %s: %s' "${tag}" "${domain}")"
+        'certificate files missing for node %s: %s' "${tag}" "${domain:-${server}}")"
       missing=1
     fi
   done < <(jq -c '.nodes[]' "${SBQD_STATE_FILE}")

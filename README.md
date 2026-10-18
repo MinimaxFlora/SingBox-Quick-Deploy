@@ -1,6 +1,6 @@
 # SingBox-Quick-Deploy
 
-> 一条命令部署 sing-box：五种协议、链式中转、订阅 / 二维码 / 多客户端导出、acme.sh 证书、IPv6 与防火墙，全中文彩色菜单（可切英文）。
+> 一条命令、一个菜单：**IP 直连即可用**。五种 sing-box 协议、自签证书 / acme.sh 域名双模式、多 IP 批量安装、装完立即出链接 / 二维码 / 订阅。
 
 [![CI](https://github.com/MinimaxFlora/SingBox-Quick-Deploy/actions/workflows/ci.yml/badge.svg)](https://github.com/MinimaxFlora/SingBox-Quick-Deploy/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
@@ -9,121 +9,148 @@
 
 ---
 
-## 特性
+## 这不是又一个“必须先有域名”的脚本
 
-| 能力 | 说明 |
-| --- | --- |
-| 五种协议 | VLESS + TCP + Reality + Vision、Hysteria2、AnyTLS、TUIC v5、VMess + TLS + WebSocket |
-| 重复添加 | 同一种协议可添加任意多个节点，端口随机高端口并自动避让冲突 |
-| 节点管理 | 添加 / 列表 / 详情 / 启停 / 删除 / 重置密钥 / 二维码，改动即时校验与热重载 |
-| 链式中转 | 节点流量经 SOCKS5 或 Shadowsocks 上游出站，按节点独立绑定，支持随时改绑或取消 |
-| 域名证书 | acme.sh HTTP-01 自动签发与续期，证书文件变更后 sing-box 自动重载 |
-| 订阅服务 | 带随机 Token 的 HTTP(S) 订阅端点，按 User-Agent 返回对应客户端格式，附只读状态面板 |
-| 一键导入 | Base64、sing-box JSON、Mihomo YAML、Quantumult X conf、单节点 URI 与二维码 |
-| 双栈与防火墙 | 入站默认监听 `::`（可切 IPv4-only），自动放行 ufw / firewalld 端口 |
-| 安全 | 状态文件 600、配置校验失败自动回滚、原子写入、并发锁、systemd 权限收敛 |
-| 双语界面 | 中文 / English 彩色 TUI，所有命令同时提供非交互子命令 |
-| 可维护 | 模块化源码 + 单文件构建，shellcheck + shfmt + 真实 sing-box 集成测试 |
+- **没有域名也能用**：Hysteria2 / AnyTLS / TUIC / VMess-WS 默认生成 **IP SAN 自签证书**，客户端勾选“允许不安全”即可连接。
+- **有域名更好**：随时在菜单里用 **acme.sh HTTP-01** 签发证书，节点切换为域名模式，客户端不再需要跳过校验。
+- **装完就能扫**：每个节点创建后立刻输出二维码、分享链接和订阅地址，不用再翻二级菜单。
+- **多 IP 机器**：自动探测所有公网 IPv4，一次为每个 IP 生成独立端口、独立密钥的节点。
+- **两种模式**：快速模式全自动；自定义模式可改端口、名称、域名与 Reality 伪装目标。
 
 ## 快速开始
+
+推荐进程替换方式（交互输入更稳）：
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/MinimaxFlora/SingBox-Quick-Deploy/main/install.sh)
 ```
 
-安装完成后运行：
+也支持管道方式（脚本会自动把输入切回终端）：
 
 ```bash
-sbqd          # 打开管理菜单
-sbqd status   # 查看状态
+curl -fsSL https://raw.githubusercontent.com/MinimaxFlora/SingBox-Quick-Deploy/main/install.sh | bash
 ```
 
-> 需要 root、systemd、Debian 12 / Ubuntu 22.04+ 或 RHEL 9 系（Rocky / AlmaLinux / CentOS Stream）。
-> ARM64 同样支持，脚本会按架构下载对应二进制。
+安装完成后输入：
 
-### 界面预览
+```bash
+sbqd
+```
+
+要求：root、systemd、Debian 12/13、Ubuntu 22.04+、RHEL 9 系；x86_64 / ARM64。
+
+## 界面
 
 ```text
-  ╭──────────────────────────────────────────────────────────────────────────╮
-  │                    ███████╗██████╗  ██████╗ ██████╗                      │
-  │                    ██╔════╝██╔══██╗██╔═══██╗██╔══██╗                     │
-  │                    ███████╗██████╔╝██║   ██║██║  ██║                     │
-  │                    ╚════██║██╔══██╗██║   ██║██║  ██║                     │
-  │                    ███████║██████╔╝╚██████╔╝██████╔╝                     │
-  │                    ╚══════╝╚═════╝  ╚═════╝ ╚═════╝                      │
-  │            v0.1.0   sing-box 一键部署 · 多协议 · 中转 · 订阅             │
-  ╰──────────────────────────────────────────────────────────────────────────╯
+当前检测到信息
+操作系统：Debian GNU/Linux 12 (bookworm)
+服务器IP：203.0.113.10
+--------------------------------------------------
+当前版本：v2.0.0     sing-box：1.14.3（运行中）
+节点：2/2    域名：0    订阅：运行中
+--------------------------------------------------
 
-  sing-box 1.14.3  ·  运行中  ·  节点 3/3
-  域名 1  ·  证书 82 天  ·  订阅 运行中
-  Debian GNU/Linux 12 · amd64  ·  203.0.113.10
+安装（可共存，一次装一种）
+  1) VLESS + TCP + Reality + Vision      直连（最推荐）
+  2) Hysteria2                           UDP 加速
+  3) AnyTLS                              TCP 伪装
+  4) TUIC v5                             UDP 低延迟
+  5) VMess + TLS + WebSocket             兼容性最好
 
-  ▌ 管理
-   1   节点管理                   3 个节点
-   2   订阅与导出
-   3   域名与证书                 1
-   4   中转上游                    1
-   5   系统与服务
-   6   设置
-   7   帮助
-   0   退出
+中转
+  6) 添加中转（SOCKS5 / Shadowsocks）
+
+管理
+  7) 查看节点 / 链接 / 二维码
+  8) 域名与证书（acme.sh）
+  9) 订阅与导出
+ 10) 设置
+ 11) 系统状态 / 日志 / 备份
+ 12) 卸载
+  0) 退出
 ```
 
-## 协议与域名
+选择协议后：
 
-| 协议 | 传输 | 需要域名 | 默认端口 |
+1. 选择要安装的 IP（多 IP 支持 `0` 全部、`1-2`、`1,3`）；
+2. 选择快速或自定义；
+3. 自动安装依赖与 sing-box、创建节点、热重载；
+4. 直接输出二维码、链接、订阅地址。
+
+## 协议
+
+| 协议 | 传输 | 域名 | 说明 |
 | --- | --- | --- | --- |
-| VLESS + Reality + Vision | TCP | 否 | 随机高端口 |
-| Hysteria2 | UDP (QUIC) | 是 | 随机高端口 |
-| AnyTLS | TCP | 是 | 随机高端口 |
-| TUIC v5 | UDP (QUIC) | 是 | 随机高端口 |
-| VMess + TLS + WebSocket | TCP | 是 | 随机高端口 |
+| VLESS + TCP + Reality + Vision | TCP | 不需要 | 伪装真实网站，抗封锁最好 |
+| Hysteria2 | UDP (QUIC) | 可选 | 自签 + `pinSHA256`，或域名证书 |
+| AnyTLS | TCP | 可选 | 自签或域名证书 |
+| TUIC v5 | UDP (QUIC) | 可选 | 自签或域名证书 |
+| VMess + TLS + WebSocket | TCP | 可选 | 自签或域名证书，兼容性最好 |
 
-- **Reality** 不需要域名与证书，用真实网站作为握手目标（默认 `www.microsoft.com`，可自选）。
-- 其余四种依赖 TLS，必须先添加域名并签发证书；没有域名时脚本会明确拒绝创建，避免自签证书带来的客户端兼容问题。
-- 端口默认在 `20000-60000` 内随机分配，可在「设置 → 端口范围」调整。
+端口默认在 `20000-60000` 内随机分配，自动避让系统端口、其他节点、订阅端口与 Clash API 端口。
 
-## 域名与证书
+## TLS 两种模式
 
-仅支持 **acme.sh + HTTP-01 standalone**（按需求确认）：
+### 自签（默认，无需域名）
 
-1. 域名 A 记录指向本机公网 IP；
-2. 放行 80 端口（脚本会在有域名时自动放行）；
-3. 菜单「域名与证书 → 添加域名」，填写域名与 ACME 邮箱。
+- 为节点地址生成 `CN=<IP>`、`subjectAltName=IP:<IP>` 的 ECC 证书；
+- 证书位于 `/etc/sing-box/cert/selfsigned/<地址>/`；
+- 分享链接自动带 `insecure=1`（Hysteria2 额外带 `pinSHA256`）；
+- Mihomo / sing-box 客户端配置带 `skip-cert-verify: true` / `insecure: true`；
+- 客户端需允许“不安全连接”。
 
-脚本自动完成签发、安装到 `/etc/sing-box/cert/<domain>/`、设置 `root:sing-box 640`、写入续期 cron。
-证书文件被覆盖后 sing-box 会自动重载，无需重启。
+### 域名（可选）
 
-## 中转（出站链式代理）
+1. 域名 A 记录指向本机；
+2. 放行 80 端口；
+3. 菜单 `8) 域名与证书 → 添加域名`，填写域名与邮箱；
+4. 创建节点时在自定义模式填写该域名。
 
-```text
-客户端 → 节点入站 → route 规则 → SOCKS5 / SS 上游 → 目标网站
-```
+证书自动续期，sing-box 检测到证书文件变化后自动重载。
 
-- 上游在「中转上游」中添加，支持 SOCKS5（可选用户名密码）与 Shadowsocks。
-- 添加节点时可直接选择上游，也可在节点详情里随时改绑或取消。
-- 每个节点独立生效，互不影响；上游删除后相关节点自动回落到直连。
+## 多 IP
+
+- 自动收集本机所有公网 IPv4（排除私网），并补充出口 IP；
+- 默认全部安装，也可只选部分；
+- 每个 IP 使用独立端口与独立密钥；
+- 每个 IP 生成独立自签证书。
 
 ## 订阅与客户端
 
-开启订阅后得到形如 `https://node.example.com:28471/sub/<token>` 的地址，按 UA 自动返回：
+菜单 `9) 订阅与导出` 可开启带 Token 的订阅服务：
 
-| 客户端 | 交付格式 |
+```text
+https://node.example.com:28471/sub/<token>
+```
+
+按 UA 自动返回：
+
+| 客户端 | 格式 |
 | --- | --- |
 | Shadowrocket、v2rayNG、Passwall、Passwall2、SSR Plus、Homeproxy | Base64 URI 列表 |
 | Stash、OpenClash、Nikki、FlClash、Clash Meta for Android | Mihomo YAML |
-| sing-box（SFI / SFA） | sing-box JSON（含 TUN 入站与 selector） |
-| Quantumult X | QX conf（仅 VMess，实验性，面板中会提示） |
+| sing-box（SFI / SFA） | sing-box JSON |
+| Quantumult X | QX conf（仅 VMess，实验性） |
 
-单节点还可导出分享链接与二维码；「订阅与导出 → 导出配置包」会生成完整目录（链接、Base64、JSON、YAML、QX、每节点二维码 PNG）。
+自签节点在 Clash / sing-box 配置里已标记跳过证书校验；QX 标记 `tls-verification=false`。
+
+单节点：创建后直接显示二维码与链接；也可在 `7) 查看节点` 中重新输出。
+
+导出包包含：`links.txt`、`links.base64`、`singbox.json`、`mihomo.yaml`、`quantumultx.conf`、每节点二维码 PNG。
+
+## 中转
+
+- 支持 SOCKS5（可选认证）与 Shadowsocks；
+- 节点创建时可选上游，也可后续在节点管理中改绑；
+- 每个节点独立生效，删除上游自动回落直连。
 
 ## 常用命令
 
 ```bash
-sbqd install                         # 安装 / 补全安装
-sbqd status --json                   # 状态（机器可读）
-sbqd node add --type vless-reality --name HK --port 28443
-sbqd node add --type hysteria2 --domain a.example.com --upstream 1
+sbqd                                             # 菜单
+sbqd node add --type vless-reality --server 203.0.113.10
+sbqd node add --type hysteria2 --server 203.0.113.10 --tls-mode selfsigned
+sbqd node add --type tuic --server 203.0.113.10 --domain node.example.com
 sbqd node list
 sbqd node show 1
 sbqd node link 1
@@ -131,49 +158,54 @@ sbqd node qr 1
 sbqd node delete 1
 sbqd node rotate 1
 sbqd node set-upstream 1 2
-sbqd domain add a.example.com --email you@example.com
-sbqd domain list
-sbqd upstream add --type socks5 --server 1.2.3.4 --port 1080 --user u --pass p
-sbqd sub enable --port 28471 --domain a.example.com
-sbqd sub url
+sbqd domain add node.example.com --email you@example.com
+sbqd upstream add --type socks5 --server 1.2.3.4 --port 1080
+sbqd sub enable --port 28471
 sbqd export /root/export
-sbqd backup
-sbqd restore /root/sbqd-backups/sbqd-20260101-120000.tar.gz
+sbqd status --json
+sbqd doctor
 sbqd update kernel
 sbqd update self
-sbqd doctor
 sbqd uninstall
 ```
 
 全局选项：`--lang zh|en`、`--json`、`--yes`、`--verbose`。
 
-## 文件与路径
+## 路径
 
 | 路径 | 用途 |
 | --- | --- |
 | `/etc/sbqd/state.json` | 节点、域名、上游、设置（600） |
-| `/etc/sbqd/sub/` | 生成的订阅文件（750，组 `sbqd-sub`） |
-| `/etc/sing-box/config.json` | sing-box 运行配置（640 root:sing-box） |
-| `/etc/sing-box/cert/<domain>/` | 证书与私钥 |
+| `/etc/sbqd/sub/` | 订阅文件（750，组 `sbqd-sub`） |
+| `/etc/sing-box/config.json` | 运行配置（640 root:sing-box） |
+| `/etc/sing-box/cert/` | 域名证书与自签证书 |
 | `/usr/local/bin/sing-box` | 内核 |
-| `/usr/local/bin/sbqd` | 脚本入口 |
-| `/usr/local/lib/sbqd/subserver.py` | 订阅服务 |
-| `/root/.acme.sh/` | acme.sh 与证书源文件 |
-| `/root/sbqd-backups/` | 备份归档 |
+| `/usr/local/bin/sbqd` | 入口（安装时持久化） |
+| `/root/sbqd-backups/` | 备份 |
 
-## 安全设计
+## 安全
 
-- 状态文件、环境文件、备份均为 `600`；配置与私钥为 `640 root:sing-box`。
-- 服务以专用用户 `sing-box` 运行，`NoNewPrivileges` + `ProtectSystem=strict` + 只暴露必要 capability。
-- 订阅服务以 `sbqd-sub` 运行，只读 `/etc/sbqd/sub`，Token 使用常量时间比较。
-- 配置生成后先 `sing-box check`，失败自动回滚到上一份可用配置。
-- 不执行远程脚本的内容；安装包仅从 GitHub Release 下载并做语法校验。
+- 状态、环境文件、备份 `600`；配置与私钥 `640 root:sing-box`；
+- sing-box 以专用用户运行，`NoNewPrivileges` + `ProtectSystem=strict`；
+- 订阅服务以 `sbqd-sub` 运行，Token 常量时间比较、只读订阅目录；
+- 配置先 `sing-box check` 再原子替换，失败自动回滚；
+- 自签证书仅用于加密传输，**生产环境建议尽快切换到域名证书**。
 
 ## 兼容性
 
-- sing-box **1.12+**（推荐 1.14.x），配置使用 1.12 新语法，不使用任何 1.13 已删除字段。
-- Debian 12 / 13、Ubuntu 22.04 / 24.04、Rocky / AlmaLinux / CentOS Stream 9。
-- systemd 必需；OpenWrt / Alpine 不在支持范围（可作为后续扩展）。
+- sing-box 1.12+（推荐 1.14.x），使用 1.12 新语法；
+- Debian 12/13、Ubuntu 22.04/24.04、Rocky / AlmaLinux / CentOS Stream 9；
+- systemd 必需；不支持 OpenWrt / Alpine 本机部署。
+
+## 从 v1 升级
+
+首次运行会自动把 schema 1 状态迁移到 schema 2：
+
+- 为旧节点补齐 `server` / `tls_mode` / `listen`；
+- 原来有域名的节点保持域名模式；
+- 原来没有域名的 TLS 节点自动转为自签模式。
+
+备份文件仍可直接恢复。
 
 ## 文档
 

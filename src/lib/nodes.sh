@@ -146,10 +146,11 @@ nodes_generate_params() {
   esac
 }
 
-# 非交互创建：type name port domain upstream_id
+# 非交互创建：type name port domain upstream_id [server] [tls_mode]
 nodes_create() {
   local type=$1 name=${2:-} port=${3:-} domain=${4:-} upstream_id=${5:-0}
-  local proto params id node payload
+  local server=${6:-} tls_mode=${7:-}
+  local proto params id node payload pin listen
 
   if ! nodes_validate_type "${type}"; then
     sbqd_err "$(sbqd_t '不支持的节点类型：%s' 'unsupported node type: %s' "${type}")"
@@ -158,27 +159,70 @@ nodes_create() {
 
   state_require
   kernel_installed || {
-    sbqd_err "$(sbqd_t 'sing-box 尚未安装，请先运行 sbqd install' 'sing-box is not installed, run sbqd install first')"
+    sbqd_err "$(sbqd_t 'sing-box 尚未安装，请先安装一个节点或运行 sbqd install' \
+      'sing-box is not installed, install a node or run sbqd install first')"
     return 1
   }
 
-  if nodes_type_needs_domain "${type}"; then
-    if [[ -z ${domain} ]]; then
-      sbqd_err "$(sbqd_t '%s 需要域名与 TLS 证书，请先添加域名' \
-        '%s requires a domain and TLS certificate, add a domain first' "$(nodes_type_label "${type}")")"
-      return 1
+  # 对外地址
+  if [[ -z ${server} ]]; then
+    if [[ -n ${domain} ]]; then
+      server=${domain}
+    else
+      server=$(state_value '.settings.public_ipv4' '')
     fi
-    if ! state_domain_exists "${domain}"; then
-      sbqd_err "$(sbqd_t '域名未托管：%s' 'domain not managed: %s' "${domain}")"
-      return 1
+    if [[ -z ${server} ]]; then
+      server=$(detect_primary_ipv4 2> /dev/null) || server=''
     fi
-    if ! cert_files_ok "${domain}"; then
-      sbqd_err "$(sbqd_t '域名 %s 的证书文件缺失，请重新签发' \
-        'certificate files missing for %s, re-issue it' "${domain}")"
-      return 1
-    fi
-  else
+  fi
+  if [[ -z ${server} ]]; then
+    sbqd_err "$(sbqd_t '无法确定服务器地址，请使用 --server 指定' \
+      'cannot determine the server address, pass --server')"
+    return 1
+  fi
+
+  # TLS 模式
+  if [[ ${type} == 'vless-reality' ]]; then
+    tls_mode='reality'
     domain=''
+  else
+    if [[ -z ${tls_mode} ]]; then
+      if [[ -n ${domain} ]]; then
+        tls_mode='domain'
+      else
+        tls_mode='selfsigned'
+      fi
+    fi
+    case ${tls_mode} in
+      domain)
+        if [[ -z ${domain} ]]; then
+          sbqd_err "$(sbqd_t '域名模式需要 --domain' 'domain mode requires --domain')"
+          return 1
+        fi
+        if ! state_domain_exists "${domain}"; then
+          sbqd_err "$(sbqd_t '域名未托管：%s（请先在域名与证书中添加）' \
+            'domain not managed: %s (add it in Domains first)' "${domain}")"
+          return 1
+        fi
+        if ! cert_files_ok "${domain}"; then
+          sbqd_err "$(sbqd_t '域名 %s 的证书文件缺失，请重新签发' \
+            'certificate files missing for %s, re-issue it' "${domain}")"
+          return 1
+        fi
+        server=${domain}
+        ;;
+      selfsigned)
+        domain=''
+        if ! cert_selfsigned_ensure "${server}"; then
+          return 1
+        fi
+        ;;
+      *)
+        sbqd_err "$(sbqd_t 'tls_mode 只能是 domain 或 selfsigned' \
+          'tls_mode must be domain or selfsigned')"
+        return 1
+        ;;
+    esac
   fi
 
   if [[ -n ${upstream_id} && ${upstream_id} != '0' ]]; then
@@ -200,20 +244,33 @@ nodes_create() {
   fi
 
   if [[ -z ${name} ]]; then
-    name="$(nodes_type_label "${type}")-$(state_node_count | awk '{print $1 + 1}')"
+    name="$(nodes_type_short "${type}")-${port}"
   fi
   name=${name//|/-}
 
   params=$(nodes_generate_params "${type}") || return 1
+
+  # Hysteria2 自签时附上证书指纹，客户端可用 pinSHA256 防中间人
+  if [[ ${type} == 'hysteria2' && ${tls_mode} == 'selfsigned' ]]; then
+    pin=$(cert_selfsigned_pin "${server}" 2> /dev/null) || pin=''
+    if [[ -n ${pin} ]]; then
+      params=$(jq -c --arg pin "${pin}" '.pin = $pin' <<< "${params}")
+    fi
+  fi
+
   id=$(state_alloc_id next_node_id)
+  SBQD_LAST_NODE_ID=${id}
+  listen=$(config_listen)
 
   payload=$(jq -nc \
     --argjson id "${id}" --arg type "${type}" --arg name "${name}" \
-    --argjson port "${port}" --arg domain "${domain}" \
+    --argjson port "${port}" --arg domain "${domain}" --arg server "${server}" \
+    --arg tls_mode "${tls_mode}" --arg listen "${listen}" \
     --argjson upstream "${upstream_id}" --argjson params "${params}" \
     --arg at "$(sbqd_iso_now)" '{
       id: $id, type: $type, name: $name, port: $port,
-      enabled: true, domain: $domain, upstream_id: $upstream,
+      enabled: true, server: $server, domain: $domain,
+      tls_mode: $tls_mode, listen: $listen, upstream_id: $upstream,
       params: $params, created_at: $at
     }')
 
@@ -226,8 +283,8 @@ nodes_create() {
     return 1
   fi
 
-  sbqd_ok "$(sbqd_t '已添加 %s #%s（端口 %s）' \
-    'added %s #%s (port %s)' "$(nodes_type_label "${type}")" "${id}" "${port}")"
+  sbqd_ok "$(sbqd_t '已添加 %s #%s（%s:%s）' \
+    'added %s #%s (%s:%s)' "$(nodes_type_label "${type}")" "${id}" "${server}" "${port}")"
 
   if [[ ${SBQD_JSON_OUT:-0} == 1 ]]; then
     jq -c . <<< "${payload}"
@@ -238,13 +295,15 @@ nodes_create() {
 }
 
 nodes_list_rows() {
-  local node id type name port domain upid enabled upstream status
+  local node id type name port addr tls upid enabled upstream status
   while IFS= read -r node; do
     id=$(jq -r '.id' <<< "${node}")
     type=$(jq -r '.type' <<< "${node}")
     name=$(jq -r '.name' <<< "${node}")
     port=$(jq -r '.port' <<< "${node}")
-    domain=$(jq -r '.domain // "-"' <<< "${node}")
+    addr=$(jq -r '.server // .domain // "-"' <<< "${node}")
+    tls=$(jq -r '(.tls_mode // (if .type == "vless-reality" then "reality"
+      elif (.domain // "") != "" then "domain" else "selfsigned" end))' <<< "${node}")
     upid=$(jq -r '.upstream_id // 0' <<< "${node}")
     enabled=$(jq -r '.enabled' <<< "${node}")
     if [[ ${upid} == '0' ]]; then
@@ -257,9 +316,9 @@ nodes_list_rows() {
     else
       status=$(sbqd_t '停用' 'off')
     fi
-    printf '%s|%s|%s|%s|%s|%s|%s\n' \
-      "${id}" "$(nodes_type_short "${type}")" "${name}" "${port}" \
-      "${domain}" "${upstream}" "${status}"
+    printf '%s|%s|%s|%s|%s|%s|%s|%s\n' \
+      "${id}" "$(nodes_type_short "${type}")" "${name}" "${addr}" "${port}" \
+      "${tls}" "${upstream}" "${status}"
   done < <(jq -c '.nodes[]' "${SBQD_STATE_FILE}")
 }
 
@@ -270,7 +329,7 @@ nodes_list() {
     sbqd_info "$(sbqd_t '还没有节点，先添加一个吧' 'no nodes yet, add one first')"
     return 0
   fi
-  header="$(sbqd_t 'ID|类型|名称|端口|域名|上游|状态' 'ID|Type|Name|Port|Domain|Upstream|State')"
+  header="$(sbqd_t 'ID|类型|名称|地址|端口|TLS|上游|状态' 'ID|Type|Name|Address|Port|TLS|Upstream|State')"
   rows=$(nodes_list_rows)
   while IFS= read -r row; do
     [[ -n ${row} ]] || continue
@@ -288,12 +347,15 @@ nodes_require_node() {
 }
 
 nodes_detail() {
-  local id=$1 node type label domain upstream enabled created uri
+  local id=$1 node type label domain server tls_mode upstream enabled created uri
   nodes_require_node "${id}" || return 1
   node=$(state_node_json "${id}")
   type=$(jq -r '.type' <<< "${node}")
   label=$(nodes_type_label "${type}")
   domain=$(jq -r '.domain // empty' <<< "${node}")
+  server=$(jq -r '.server // .domain // "-"' <<< "${node}")
+  tls_mode=$(jq -r '(.tls_mode // (if .type == "vless-reality" then "reality"
+    elif (.domain // "") != "" then "domain" else "selfsigned" end))' <<< "${node}")
   enabled=$(jq -r '.enabled' <<< "${node}")
   created=$(jq -r '.created_at // "-"' <<< "${node}")
 
@@ -301,8 +363,12 @@ nodes_detail() {
   ui_box_line "$(sbqd_t '编号' 'ID')        #${id}"
   ui_box_line "$(sbqd_t '类型' 'Type')      ${label}"
   ui_box_line "$(sbqd_t '名称' 'Name')      $(jq -r '.name' <<< "${node}")"
+  ui_box_line "$(sbqd_t '地址' 'Address')   ${server}"
   ui_box_line "$(sbqd_t '端口' 'Port')      $(jq -r '.port' <<< "${node}")/$(nodes_type_transport "${type}")"
-  ui_box_line "$(sbqd_t '域名' 'Domain')    ${domain:--}"
+  ui_box_line "$(sbqd_t 'TLS' 'TLS')        ${tls_mode}"
+  if [[ -n ${domain} ]]; then
+    ui_box_line "$(sbqd_t '域名' 'Domain')    ${domain}"
+  fi
   ui_box_line "$(sbqd_t '状态' 'State')     $(if [[ ${enabled} == true ]]; then sbqd_t '启用' 'on'; else sbqd_t '停用' 'off'; fi)"
   ui_box_line "$(sbqd_t '创建时间' 'Created') ${created}"
   ui_box_bottom
@@ -322,6 +388,56 @@ nodes_qr() {
   nodes_require_node "${id}" || return 1
   node=$(state_node_json "${id}")
   share_node_qr "${node}"
+}
+
+# geto 风格：装完立即输出二维码、链接与导入方式
+nodes_print_share() {
+  local id=$1 node type name addr port tls uri sub
+  nodes_require_node "${id}" || return 1
+  node=$(state_node_json "${id}")
+  type=$(jq -r '.type' <<< "${node}")
+  name=$(jq -r '.name' <<< "${node}")
+  addr=$(jq -r '.server // .domain' <<< "${node}")
+  port=$(jq -r '.port' <<< "${node}")
+  tls=$(jq -r '(.tls_mode // "selfsigned")' <<< "${node}")
+  uri=$(share_node_uri "${node}") || return 1
+  sub=$(share_sub_url 2> /dev/null) || sub=''
+
+  printf '\n%s========== %s ==========%s\n' "${SBQD_C_BOLD}" "${name}" "${SBQD_C_RESET}"
+  share_node_qr "${node}"
+  printf '\n'
+  printf '  类型   %s\n' "$(nodes_type_label "${type}")"
+  printf '  地址   %s\n' "${addr}"
+  printf '  端口   %s/%s\n' "${port}" "$(nodes_type_transport "${type}")"
+  printf '  TLS    %s\n' "${tls}"
+  printf '\n%s分享链接%s\n%s\n' "${SBQD_C_BOLD}" "${SBQD_C_RESET}" "${uri}"
+  if [[ -n ${sub} ]]; then
+    printf '\n%s订阅地址%s\n%s\n' "${SBQD_C_BOLD}" "${SBQD_C_RESET}" "${sub}"
+    printf '  Clash / Stash / sing-box 等客户端直接导入该地址。\n'
+  fi
+}
+
+nodes_random_handshake() {
+  local -a hosts=(
+    'www.microsoft.com'
+    'www.apple.com'
+    'www.cloudflare.com'
+    'dl.google.com'
+    'www.amazon.com'
+    'www.bing.com'
+  )
+  printf '%s' "${hosts[RANDOM % ${#hosts[@]}]}"
+}
+
+# 快速安装一个节点（geto 风格）：type server [tls_mode] [domain]
+nodes_quick_install() {
+  local type=$1 server=$2 tls_mode=${3:-} domain=${4:-} port name
+  port=$(nodes_pick_port "$(nodes_type_transport "${type}")")
+  if [[ ${type} == 'vless-reality' ]]; then
+    SBQD_NODE_HANDSHAKE=$(nodes_random_handshake)
+  fi
+  name="$(nodes_type_short "${type}")-${port}"
+  nodes_create "${type}" "${name}" "${port}" "${domain}" 0 "${server}" "${tls_mode}"
 }
 
 nodes_toggle() {

@@ -3,6 +3,34 @@
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [2.0.0] - 2026-10-18
+
+按 geto.im oneclick 的交互重写，核心变化是 **IP 直连优先**。
+
+### 新增
+
+- 扁平主菜单：安装协议 → 选 IP → 快速/自定义 → 立即输出链接/二维码/订阅。
+- IP 直连自签证书：`CN=<IP>` + `subjectAltName=IP:<IP>`，无需域名。
+- 多 IP 批量安装：自动探测本机全部公网 IPv4，支持 `0` / `1-2` / `1,3` 选择。
+- 快速模式与自定义模式（端口、名称、域名、Reality 伪装目标）。
+- Hysteria2 `pinSHA256` 指纹，客户端可跳过校验但仍校验证书。
+- 节点新增 `server` / `tls_mode` / `listen` 字段；schema 1 自动迁移。
+- `sbqd install` 安装后直接进入菜单；`sbqd` 空参数直接打开菜单。
+- 安装时把单文件持久化为 `/usr/local/bin/sbqd`。
+- 根权限 mock 安装测试（桩 systemctl），覆盖 ensure_base 与自签节点。
+
+### 变更
+
+- TLS 协议不再强制域名；域名模式仍使用 acme.sh HTTP-01。
+- 订阅导出的 Mihomo / sing-box / QX 会按自签模式写入 `skip-cert-verify` / `insecure` / `tls-verification=false`。
+- 节点列表新增地址与 TLS 模式列。
+- 安装/使用合并：首次选择协议时才安装依赖与 sing-box。
+
+### 修复
+
+- `curl | bash` 时交互输入切回 `/dev/tty`，避免无法操作菜单。
+- 自签证书目录归属 `root:sing-box`，服务用户可读。
+
 ## [0.1.1] - 2026-10-18
 
 ### 修复

@@ -1,93 +1,116 @@
 # SingBox-Quick-Deploy
 
-> One command to deploy sing-box: five protocols, outbound relay chaining, subscriptions / QR codes / multi-client export, acme.sh certificates, IPv6 and firewall — with a bilingual (Chinese / English) colored TUI.
+> One command, one menu: **works with a bare IP**. Five sing-box protocols, self-signed or acme.sh domain certificates, multi-IP install, and links / QR / subscription right after creation.
 
 [![CI](https://github.com/MinimaxFlora/SingBox-Quick-Deploy/actions/workflows/ci.yml/badge.svg)](https://github.com/MinimaxFlora/SingBox-Quick-Deploy/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+[![sing-box](https://img.shields.io/badge/sing--box-1.12%2B-00b4d8.svg)](https://sing-box.sagernet.org/)
 
-## Features
+## No domain required
 
-- **Five protocols**: VLESS + TCP + Reality + Vision, Hysteria2, AnyTLS, TUIC v5, VMess + TLS + WebSocket.
-- **Unlimited nodes**: add the same protocol repeatedly; ports are randomly allocated in a high range with automatic collision avoidance.
-- **Node lifecycle**: add, list, inspect, enable/disable, delete, rotate secrets, QR code — every change is validated and hot-reloaded.
-- **Relay chaining**: per-node outbound through SOCKS5 or Shadowsocks upstream.
-- **Domains & certificates**: acme.sh HTTP-01 issuance and renewal; sing-box reloads certificates automatically when files change.
-- **Subscription server**: token-protected HTTP(S) endpoint with User-Agent based format negotiation and a read-only dashboard.
-- **Export anywhere**: share links, Base64, sing-box JSON, Mihomo YAML, Quantumult X conf, per-node QR PNG.
-- **Dual stack & firewall**: inbounds listen on `::` (IPv4-only switch), automatic ufw / firewalld rules.
-- **Safe by default**: `600` state, `640` config and keys, rollback on validation failure, atomic writes, locking, hardened systemd units.
-- **Maintainable**: modular bash sources, single-file release build, shellcheck + shfmt + real sing-box integration tests.
+- Hysteria2 / AnyTLS / TUIC / VMess-WS default to a **self-signed certificate with IP SAN**.
+- Add a domain later to switch a node to an **acme.sh HTTP-01** certificate.
+- Every node prints its QR code, share link and subscription URL immediately.
+- Multi-IP VPS: one node per public IPv4, with separate ports and keys.
+- Quick mode is fully automatic; custom mode lets you set port, name, domain and Reality target.
 
 ## Quick start
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/MinimaxFlora/SingBox-Quick-Deploy/main/install.sh)
+```
+
+Piping also works (the installer reconnects stdin to the terminal):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/MinimaxFlora/SingBox-Quick-Deploy/main/install.sh | bash
 ```
 
-Then:
+Then run:
 
 ```bash
-sbqd          # interactive menu
-sbqd status   # status
+sbqd
 ```
 
-Requirements: root, systemd, Debian 12 / Ubuntu 22.04+ or RHEL 9 family; ARM64 supported.
+Requirements: root, systemd, Debian 12/13, Ubuntu 22.04+, RHEL 9 family; x86_64 / ARM64.
+
+## Menu
+
+```text
+Current environment
+OS: Debian GNU/Linux 12 (bookworm)
+Server IP: 203.0.113.10
+--------------------------------------------------
+Version: v2.0.0     sing-box: 1.14.3 (running)
+Nodes: 2/2    Domains: 0    Subscription: running
+--------------------------------------------------
+
+Install (co-exist, one at a time)
+  1) VLESS + TCP + Reality + Vision      direct (recommended)
+  2) Hysteria2                           UDP acceleration
+  3) AnyTLS                              TCP camouflage
+  4) TUIC v5                             low-latency UDP
+  5) VMess + TLS + WebSocket             best compatibility
+
+Relay
+  6) Add upstream (SOCKS5 / Shadowsocks)
+
+Manage
+  7) Nodes / links / QR
+  8) Domains & certificates (acme.sh)
+  9) Subscription & export
+ 10) Settings
+ 11) System / logs / backup
+ 12) Uninstall
+  0) Exit
+```
 
 ## Protocols
 
-| Protocol | Transport | Domain required | Port |
+| Protocol | Transport | Domain | Notes |
 | --- | --- | --- | --- |
-| VLESS + Reality + Vision | TCP | No | random high |
-| Hysteria2 | UDP (QUIC) | Yes | random high |
-| AnyTLS | TCP | Yes | random high |
-| TUIC v5 | UDP (QUIC) | Yes | random high |
-| VMess + TLS + WebSocket | TCP | Yes | random high |
+| VLESS + Reality + Vision | TCP | No | Best anti-censorship |
+| Hysteria2 | UDP (QUIC) | Optional | Self-signed + `pinSHA256`, or domain |
+| AnyTLS | TCP | Optional | Self-signed or domain |
+| TUIC v5 | UDP (QUIC) | Optional | Self-signed or domain |
+| VMess + TLS + WebSocket | TCP | Optional | Self-signed or domain |
 
-Reality uses a real website as handshake target (default `www.microsoft.com`). The other four require a TLS certificate, so add a domain first — self-signed certificates are intentionally not supported.
+Ports are randomly allocated in `20000-60000` and avoid system ports, other nodes, the subscription port and the Clash API port.
 
-## Domain & certificate
+## TLS modes
 
-Only **acme.sh + HTTP-01 standalone** is supported:
+**Self-signed (default)** — ECC certificate with `CN=<IP>` and `subjectAltName=IP:<IP>`; links carry `insecure=1` (Hysteria2 also `pinSHA256`); Mihomo / sing-box exports use `skip-cert-verify` / `insecure`.
 
-1. Point the domain's A record to the server's public IP.
-2. Port 80 must be reachable and free.
-3. Menu: **Domains & certificates → Add domain**, enter domain and ACME email.
-
-Certificates are installed to `/etc/sing-box/cert/<domain>/` with `root:sing-box 640`, and a renewal cron is written.
-
-## Relay
-
-```text
-client → node inbound → route rule → SOCKS5 / SS upstream → destination
-```
-
-Upstreams are managed under **Upstream relay**; each node can be bound to one upstream independently, or switched back to direct at any time.
+**Domain (optional)** — point DNS to the server, open port 80, add the domain under `8) Domains & certificates`, then use it in custom mode. Renewal is automatic.
 
 ## Subscription
 
-Enable the subscription server to get `https://node.example.com:28471/sub/<token>`. Format is selected by User-Agent:
+```text
+https://node.example.com:28471/sub/<token>
+```
+
+User-Agent based format negotiation:
 
 | Client | Format |
 | --- | --- |
 | Shadowrocket, v2rayNG, Passwall, Passwall2, SSR Plus, Homeproxy | Base64 URI list |
 | Stash, OpenClash, Nikki, FlClash, Clash Meta for Android | Mihomo YAML |
-| sing-box (SFI / SFA) | sing-box JSON (with TUN inbound and selector) |
-| Quantumult X | QX conf (VMess only, experimental) |
+| sing-box (SFI / SFA) | sing-box JSON |
+| Quantumult X | QX conf (VMess only) |
 
 ## CLI
 
 ```bash
-sbqd node add --type vless-reality --name HK --port 28443
-sbqd node add --type hysteria2 --domain a.example.com --upstream 1
+sbqd node add --type vless-reality --server 203.0.113.10
+sbqd node add --type hysteria2 --server 203.0.113.10 --tls-mode selfsigned
+sbqd node add --type tuic --server 203.0.113.10 --domain node.example.com
 sbqd node list
 sbqd node qr 1
-sbqd domain add a.example.com --email you@example.com
-sbqd upstream add --type socks5 --server 1.2.3.4 --port 1080
+sbqd domain add node.example.com --email you@example.com
 sbqd sub enable --port 28471
 sbqd export /root/export
-sbqd backup
+sbqd status --json
 sbqd doctor
-sbqd update kernel
 sbqd uninstall
 ```
 
@@ -98,19 +121,24 @@ Global flags: `--lang zh|en`, `--json`, `--yes`, `--verbose`.
 | Path | Purpose |
 | --- | --- |
 | `/etc/sbqd/state.json` | nodes, domains, upstreams, settings (600) |
-| `/etc/sbqd/sub/` | generated subscription files |
+| `/etc/sbqd/sub/` | subscription files |
 | `/etc/sing-box/config.json` | runtime config (640 root:sing-box) |
-| `/etc/sing-box/cert/<domain>/` | certificates and keys |
-| `/usr/local/bin/sing-box` | kernel binary |
+| `/etc/sing-box/cert/` | domain and self-signed certificates |
 | `/usr/local/bin/sbqd` | entrypoint |
-| `/root/.acme.sh/` | acme.sh home |
-| `/root/sbqd-backups/` | backups |
+
+## Security
+
+State and backups are `600`; config and keys are `640 root:sing-box`. sing-box runs as an unprivileged user with `NoNewPrivileges` and `ProtectSystem=strict`. Configs are validated and rolled back on failure. Self-signed certificates are for transport encryption only — switch to a domain certificate for production.
+
+## Upgrade from v1
+
+State schema 1 migrates to schema 2 automatically on first run: nodes get `server` / `tls_mode` / `listen`, domain nodes stay in domain mode, and TLS nodes without a domain become self-signed.
 
 ## Docs
 
 - [Usage](docs/USAGE.md)
 - [Architecture](docs/ARCHITECTURE.md)
-- [Client import guide](docs/CLIENTS.md)
+- [Client guide](docs/CLIENTS.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Contributing](CONTRIBUTING.md)
 

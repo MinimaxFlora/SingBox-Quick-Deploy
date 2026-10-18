@@ -21,8 +21,13 @@ sbqd_language_choose() {
   esac
 }
 
-sbqd_install_base() {
-  local ip4 ip6 api_port
+# 惰性基础安装：任意协议安装前调用，可重复执行
+sbqd_ensure_base() {
+  local ip4 ip6 api_port ips json first
+
+  if [[ ${SBQD_BASE_READY:-0} == '1' ]]; then
+    return 0
+  fi
 
   sbqd_require_root
   detect_all
@@ -40,13 +45,27 @@ sbqd_install_base() {
 
   state_init
 
-  ip4=$(detect_public_ipv4 2> /dev/null) || ip4=$(detect_local_ipv4 2> /dev/null) || ip4=''
-  ip6=$(detect_public_ipv6 2> /dev/null) || ip6=''
-  if [[ -n ${ip4} && -z $(state_value '.settings.public_ipv4') ]]; then
-    state_update '.settings.public_ipv4 = $ip' --arg ip "${ip4}"
+  # 多 IP：本机全局地址 + 出口地址
+  ips=$(detect_public_ips)
+  if [[ -z ${ips} ]]; then
+    ip6=$(detect_public_ipv6 2> /dev/null) || ip6=''
+    if [[ -n ${ip6} ]]; then
+      ips=${ip6}
+      state_update '.settings.public_ipv6 = $ip' --arg ip "${ip6}"
+    fi
   fi
-  if [[ -n ${ip6} && -z $(state_value '.settings.public_ipv6') ]]; then
-    state_update '.settings.public_ipv6 = $ip' --arg ip "${ip6}"
+  if [[ -n ${ips} ]]; then
+    json=$(printf '%s\n' "${ips}" | jq -R -s 'split("\n") | map(select(length > 0))')
+    state_update '.settings.detected_ips = $v' --argjson v "${json}"
+    first=$(head -n 1 <<< "${ips}")
+    ip4=$(state_value '.settings.public_ipv4' '')
+    if [[ -z ${ip4} && -n ${first} ]]; then
+      if sbqd_is_ipv6 "${first}"; then
+        state_update '.settings.public_ipv6 = $ip' --arg ip "${first}"
+      else
+        state_update '.settings.public_ipv4 = $ip' --arg ip "${first}"
+      fi
+    fi
   fi
 
   api_port=$(state_value '.settings.clash_api.port' '0')
@@ -60,6 +79,19 @@ sbqd_install_base() {
   config_apply
   service_enable_start || sbqd_die "$(sbqd_t 'sing-box 服务启动失败' 'failed to start sing-box service')"
   firewall_sync || true
+
+  # 单文件版本持久化为 sbqd 命令
+  if [[ -n ${SBQD_EMBEDDED_SUBSERVER:-} && -n ${SBQD_SELF:-} && -f ${SBQD_SELF} &&
+    ${SBQD_SELF} != "${SBQD_BIN_DIR}/sbqd" ]]; then
+    install -m 755 "${SBQD_SELF}" "${SBQD_BIN_DIR}/sbqd" 2> /dev/null || true
+  fi
+
+  SBQD_BASE_READY=1
+  return 0
+}
+
+sbqd_install_base() {
+  sbqd_ensure_base
 }
 
 sbqd_install_summary() {
@@ -104,11 +136,16 @@ sbqd_first_run() {
 
 sbqd_install() {
   if ((SBQD_TTY)); then
-    ui_banner
+    # 支持 curl | bash：交互输入切回终端
+    if [[ ! -t 0 && -r /dev/tty ]]; then
+      exec < /dev/tty
+    fi
   fi
-  sbqd_install_base
-  if [[ ${SBQD_ASSUME_YES:-0} != '1' && -t 0 ]] && [[ $(state_node_count) == '0' ]]; then
-    sbqd_first_run
+
+  sbqd_ensure_base || return 1
+  if ((SBQD_TTY)) && [[ ${SBQD_ASSUME_YES:-0} != '1' ]]; then
+    sbqd_menu_main
+    return 0
   fi
   sbqd_install_summary
 }

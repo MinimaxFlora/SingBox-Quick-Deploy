@@ -7,7 +7,7 @@
 # =============================================================================
 
 # --- 版本与项目信息 ----------------------------------------------------------
-SBQD_VERSION=${SBQD_VERSION:-0.1.0}
+SBQD_VERSION=${SBQD_VERSION:-2.0.0}
 SBQD_NAME='SingBox-Quick-Deploy'
 SBQD_REPO='MinimaxFlora/SingBox-Quick-Deploy'
 SBQD_HOME_URL="https://github.com/${SBQD_REPO}"

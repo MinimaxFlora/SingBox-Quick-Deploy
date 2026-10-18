@@ -57,8 +57,10 @@ CI 会以 `shfmt -d -i 2 -ci -sr` 与 shellcheck 为准。
 | `tests/bats/*.bats` | 纯函数、状态、链接与配置结构的 bats 单元测试 |
 | `tests/run-smoke.sh` | 状态层与工具函数 |
 | `tests/run-config.sh` | 用真实 sing-box 校验配置（需二进制） |
+| `tests/run-selfsigned.sh` | IP 自签证书、insecure 链接、schema 迁移 |
 | `tests/run-share.sh` | URI / 订阅 / 构建 |
 | `tests/run-subserver.sh` | 订阅服务端点 |
+| `tests/run-install-mock.sh` | root 下用桩 systemctl 跑通 ensure_base + 创建节点（非 root 自动跳过） |
 
 下载测试用内核：
 

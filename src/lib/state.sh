@@ -2,16 +2,16 @@
 # shellcheck disable=SC2154,SC2016,SC2034
 # =============================================================================
 #  state.sh · 状态存储层
-#  职责：state.json 的初始化、校验、原子更新与领域查询
-#  设计：单一 JSON 文件（jq），每次写入原子替换并保留 .prev 快照
+#  schema 2：节点携带 server / domain / tls_mode / listen，支持 IP 直连自签
+#  兼容 schema 1 自动迁移
 # =============================================================================
 
-SBQD_STATE_SCHEMA=1
+SBQD_STATE_SCHEMA=2
 
 state_require() {
   if [[ ! -f ${SBQD_STATE_FILE} ]]; then
-    sbqd_die "$(sbqd_t '状态文件不存在：%s\n请先运行 sbqd install 完成安装' \
-      'state file not found: %s\nrun sbqd install first' "${SBQD_STATE_FILE}")"
+    sbqd_die "$(sbqd_t '尚未初始化，请先安装一个节点或运行 sbqd install' \
+      'not initialized yet, install a node or run sbqd install first')"
   fi
 }
 
@@ -21,6 +21,7 @@ state_exists() {
 
 state_init() {
   if [[ -f ${SBQD_STATE_FILE} ]]; then
+    state_migrate
     return 0
   fi
 
@@ -39,7 +40,7 @@ state_init() {
     --argjson pmin "${SBQD_PORT_MIN}" \
     --argjson pmax "${SBQD_PORT_MAX}" \
     '{
-      schema: 1,
+      schema: 2,
       created_at: $now,
       updated_at: $now,
       next_node_id: 1,
@@ -52,6 +53,7 @@ state_init() {
         ipv6: true,
         public_ipv4: "",
         public_ipv6: "",
+        detected_ips: [],
         clash_api: {enabled: true, listen: "127.0.0.1", port: 0, secret: $api_secret},
         subscription: {enabled: false, port: 0, token: $sub_token, tls: false, domain: "", panel_url: ""},
         singbox: {version: "", mirror: ""}
@@ -64,17 +66,51 @@ state_init() {
   chmod 600 "${SBQD_STATE_FILE}"
 }
 
+# schema 1 → 2：补齐 server / tls_mode / listen
+state_migrate() {
+  state_exists || return 0
+  local schema ip
+  schema=$(jq -r '.schema // 0' "${SBQD_STATE_FILE}" 2> /dev/null) || schema=0
+  if [[ ${schema} =~ ^[0-9]+$ ]] && ((schema >= 2)); then
+    return 0
+  fi
+
+  ip=$(jq -r '.settings.public_ipv4 // ""' "${SBQD_STATE_FILE}" 2> /dev/null) || ip=''
+  if ! jq --arg ip "${ip}" '
+    .schema = 2 |
+    .settings.detected_ips = (
+      if (.settings.detected_ips // [] | length) > 0 then .settings.detected_ips
+      elif $ip != "" then [$ip]
+      else [] end) |
+    .nodes = [.nodes[] |
+      .server = (.server // (if (.domain // "") != "" then .domain else $ip end)) |
+      .tls_mode = (.tls_mode //
+        (if .type == "vless-reality" then "reality"
+         elif (.domain // "") != "" then "domain"
+         else "selfsigned" end)) |
+      .listen = (.listen // "::")
+    ]
+  ' "${SBQD_STATE_FILE}" | sbqd_atomic_write "${SBQD_STATE_FILE}"; then
+    sbqd_warn "$(sbqd_t '状态迁移失败，继续使用原文件' 'state migration failed, keeping the old file')"
+    return 1
+  fi
+  chmod 600 "${SBQD_STATE_FILE}"
+  sbqd_log_file info 'state migrated to schema 2'
+  return 0
+}
+
 state_validate() {
   local ok=0
   jq -e '
-    (.schema == 1) and
+    (.schema >= 2) and
     (.settings | type == "object") and
     (.nodes | type == "array") and
     (.upstreams | type == "array") and
     (.domains | type == "array") and
     (([.nodes[].port] | length) == ([.nodes[].port] | unique | length)) and
     (([.nodes[].id] | length) == ([.nodes[].id] | unique | length)) and
-    (([.nodes[].type] - ["vless-reality", "hysteria2", "anytls", "tuic", "vmess-ws"]) | length == 0)
+    (([.nodes[].type] - ["vless-reality", "hysteria2", "anytls", "tuic", "vmess-ws"]) | length == 0) and
+    (([.nodes[].tls_mode // "selfsigned"] - ["reality", "domain", "selfsigned"]) | length == 0)
   ' "${SBQD_STATE_FILE}" > /dev/null 2>&1 || ok=1
 
   if ((ok)); then
@@ -163,6 +199,30 @@ state_node_field() {
     '.nodes[] | select(.id == $id) | .[$f] // empty' "${SBQD_STATE_FILE}"
 }
 
+state_node_server() {
+  local id=$1
+  jq -r --argjson id "${id}" '
+    .nodes[] | select(.id == $id) |
+    (.server // .domain // "")
+  ' "${SBQD_STATE_FILE}"
+}
+
+state_node_tls_mode() {
+  local id=$1
+  jq -r --argjson id "${id}" '
+    .nodes[] | select(.id == $id) |
+    (.tls_mode //
+      (if .type == "vless-reality" then "reality"
+       elif (.domain // "") != "" then "domain"
+       else "selfsigned" end))
+  ' "${SBQD_STATE_FILE}"
+}
+
+state_node_listen() {
+  local id=$1
+  state_node_field "${id}" 'listen'
+}
+
 state_node_count() {
   jq -r '.nodes | length' "${SBQD_STATE_FILE}"
 }
@@ -181,10 +241,19 @@ state_node_tag() {
   printf '%s-%s' "${type}" "${id}"
 }
 
-# 节点是否有可用的域名与证书
 state_node_domain() {
   local id=$1
   state_node_field "${id}" 'domain'
+}
+
+# --- 公网地址 ---------------------------------------------------------------
+state_set_detected_ips() {
+  local json=$1
+  state_update '.settings.detected_ips = $v' --argjson v "${json}"
+}
+
+state_detected_ips() {
+  jq -r '.settings.detected_ips[]? // empty' "${SBQD_STATE_FILE}" 2> /dev/null || true
 }
 
 # --- 上游中转 ---------------------------------------------------------------
@@ -242,7 +311,7 @@ state_domain_names() {
   jq -r '.domains[].domain' "${SBQD_STATE_FILE}"
 }
 
-# 返回最早到期证书的剩余天数（无证书时输出 9999）
+# 返回最早到期证书的剩余天数（无域名证书时输出 9999）
 state_cert_days_left() {
   local min=9999 days issued
   while IFS= read -r issued; do

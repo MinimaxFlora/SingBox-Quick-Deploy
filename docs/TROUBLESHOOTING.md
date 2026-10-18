@@ -8,6 +8,18 @@ sbqd doctor
 
 它会检查依赖、内核、状态文件、运行配置、服务状态与证书剩余天数。
 
+## 0. 自签证书节点连不上
+
+自签模式（IP 直连）要求客户端允许不安全连接：
+
+- Shadowrocket：节点设置里打开「允许不安全」；
+- Stash / Mihomo：`skip-cert-verify: true`（导出的 YAML 已自动写入）；
+- sing-box：`tls.insecure: true`（导出的 JSON 已自动写入）；
+- v2rayN：VMess 节点勾选「允许不安全」；
+- Hysteria2：链接带 `insecure=1` 与 `pinSHA256`，客户端忽略证书错误但仍校验证书指纹。
+
+如果客户端没有“允许不安全”选项，请改用域名证书模式，或换用支持该选项的客户端。
+
 ## 1. 安装失败
 
 ### `systemd is not running`

@@ -51,6 +51,7 @@ jobs:
         run: |
           bash tests/run-smoke.sh
           bash tests/run-config.sh
+          bash tests/run-selfsigned.sh
           bash tests/run-share.sh
           bash tests/run-subserver.sh
 

@@ -5,16 +5,16 @@
 #  交付格式：URI 列表 / Base64 / sing-box JSON / Mihomo YAML / Quantumult X conf
 # =============================================================================
 
-# 节点的对外地址：优先域名，其次公网 IPv4 / IPv6
-share_address() {
-  local node=$1 domain addr
-  domain=$(jq -r '.domain // empty' <<< "${node}")
-  if [[ -n ${domain} ]]; then
-    printf '%s' "${domain}"
-    return 0
+# 节点的对外地址：优先节点自己的 server，其次域名 / 全局公网地址
+share_server_raw() {
+  local node=$1 addr
+  addr=$(jq -r '.server // empty' <<< "${node}")
+  if [[ -z ${addr} ]]; then
+    addr=$(jq -r '.domain // empty' <<< "${node}")
   fi
-
-  addr=$(state_value '.settings.public_ipv4')
+  if [[ -z ${addr} ]]; then
+    addr=$(state_value '.settings.public_ipv4')
+  fi
   if [[ -z ${addr} ]]; then
     addr=$(state_value '.settings.public_ipv6')
   fi
@@ -26,12 +26,48 @@ share_address() {
       'no public address detected, set the server address in settings first')"
     return 1
   fi
+  printf '%s' "${addr}"
+}
 
+share_address() {
+  local addr
+  addr=$(share_server_raw "$1") || return 1
   if sbqd_is_ipv6 "${addr}"; then
     printf '[%s]' "${addr}"
   else
     printf '%s' "${addr}"
   fi
+}
+
+share_tls_mode() {
+  jq -r '(.tls_mode //
+    (if .type == "vless-reality" then "reality"
+     elif (.domain // "") != "" then "domain"
+     else "selfsigned" end))' <<< "$1"
+}
+
+share_insecure() {
+  if [[ $(share_tls_mode "$1") == 'selfsigned' ]]; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
+# TLS server_name：域名优先，否则用 IP 直连地址
+share_sni() {
+  local node=$1 domain server
+  domain=$(jq -r '.domain // empty' <<< "${node}")
+  if [[ -n ${domain} ]]; then
+    printf '%s' "${domain}"
+    return 0
+  fi
+  server=$(share_server_raw "${node}") || return 1
+  printf '%s' "${server}"
+}
+
+share_cert_pin() {
+  jq -r '.params.pin // empty' <<< "$1"
 }
 
 share_base64() {
@@ -41,9 +77,12 @@ share_base64() {
 
 # --- 单节点 URI -------------------------------------------------------------
 share_node_uri() {
-  local node=$1 type addr
+  local node=$1 type addr sni insecure pin
   type=$(jq -r '.type' <<< "${node}")
   addr=$(share_address "${node}") || return 1
+  sni=$(share_sni "${node}") || return 1
+  insecure=$(share_insecure "${node}")
+  pin=$(share_cert_pin "${node}")
 
   case ${type} in
     vless-reality)
@@ -56,32 +95,38 @@ share_node_uri() {
         "#" + ($n.name | @uri)'
       ;;
     hysteria2)
-      jq -rn --argjson n "${node}" --arg addr "${addr}" '
+      jq -rn --argjson n "${node}" --arg addr "${addr}" --arg sni "${sni}" \
+        --argjson insecure "${insecure}" --arg pin "${pin}" '
         "hysteria2://" + ($n.params.password | @uri) + "@" + $addr + ":" +
-        ($n.port | tostring) + "/?sni=" + ($n.domain | @uri) + "&insecure=0" +
+        ($n.port | tostring) + "/?sni=" + ($sni | @uri) +
+        "&insecure=" + ($insecure | tostring) +
+        (if $pin != "" then "&pinSHA256=" + ($pin | @uri) else "" end) +
         (if ($n.params.obfs // false) then
            "&obfs=salamander&obfs-password=" + ($n.params.obfs_password | @uri)
          else "" end) +
         "#" + ($n.name | @uri)'
       ;;
     anytls)
-      jq -rn --argjson n "${node}" --arg addr "${addr}" '
+      jq -rn --argjson n "${node}" --arg addr "${addr}" --arg sni "${sni}" \
+        --argjson insecure "${insecure}" '
         "anytls://" + ($n.params.password | @uri) + "@" + $addr + ":" +
-        ($n.port | tostring) + "/?sni=" + ($n.domain | @uri) + "&insecure=0" +
+        ($n.port | tostring) + "/?sni=" + ($sni | @uri) +
+        "&insecure=" + ($insecure | tostring) +
         "#" + ($n.name | @uri)'
       ;;
     tuic)
-      jq -rn --argjson n "${node}" --arg addr "${addr}" '
+      jq -rn --argjson n "${node}" --arg addr "${addr}" --arg sni "${sni}" \
+        --argjson insecure "${insecure}" '
         "tuic://" + $n.params.uuid + ":" + ($n.params.password | @uri) + "@" +
         $addr + ":" + ($n.port | tostring) +
         "?congestion_control=" + ($n.params.congestion_control // "bbr") +
-        "&alpn=h3&sni=" + ($n.domain | @uri) +
-        "&udp_relay_mode=native&allow_insecure=0" +
+        "&alpn=h3&sni=" + ($sni | @uri) +
+        "&udp_relay_mode=native&allow_insecure=" + ($insecure | tostring) +
         "#" + ($n.name | @uri)'
       ;;
     vmess-ws)
       local json
-      json=$(jq -cn --argjson n "${node}" --arg addr "${addr}" '{
+      json=$(jq -cn --argjson n "${node}" --arg addr "${addr}" --arg sni "${sni}" '{
         v: "2",
         ps: $n.name,
         add: $addr,
@@ -91,10 +136,10 @@ share_node_uri() {
         scy: "auto",
         net: "ws",
         type: "none",
-        host: $n.domain,
+        host: $sni,
         path: $n.params.ws_path,
         tls: "tls",
-        sni: $n.domain,
+        sni: $sni,
         alpn: "http/1.1",
         fp: "chrome"
       }') || return 1
@@ -134,9 +179,11 @@ share_node_qr_png() {
 
 # --- sing-box 客户端配置 ----------------------------------------------------
 share_singbox_outbound() {
-  local node=$1 type addr tag
+  local node=$1 type addr sni insecure tag
   type=$(jq -r '.type' <<< "${node}")
   addr=$(share_address "${node}") || return 1
+  sni=$(share_sni "${node}") || return 1
+  insecure=$(share_insecure "${node}")
   tag="node-$(jq -r '.id' <<< "${node}")"
 
   case ${type} in
@@ -150,35 +197,39 @@ share_singbox_outbound() {
                          short_id: $n.params.short_id}}}'
       ;;
     hysteria2)
-      jq -nc --argjson n "${node}" --arg addr "${addr}" --arg tag "${tag}" '
+      jq -nc --argjson n "${node}" --arg addr "${addr}" --arg tag "${tag}" \
+        --arg sni "${sni}" --argjson insecure "${insecure}" '
         {type: "hysteria2", tag: $tag, server: $addr, server_port: ($n.port | tonumber),
          password: $n.params.password,
-         tls: {enabled: true, server_name: $n.domain, alpn: ["h3"]}}
+         tls: {enabled: true, server_name: $sni, alpn: ["h3"], insecure: ($insecure == 1)}}
         + (if ($n.params.obfs // false) then
              {obfs: {type: "salamander", password: $n.params.obfs_password}}
            else {} end)'
       ;;
     anytls)
-      jq -nc --argjson n "${node}" --arg addr "${addr}" --arg tag "${tag}" '
+      jq -nc --argjson n "${node}" --arg addr "${addr}" --arg tag "${tag}" \
+        --arg sni "${sni}" --argjson insecure "${insecure}" '
         {type: "anytls", tag: $tag, server: $addr, server_port: ($n.port | tonumber),
          password: $n.params.password,
-         tls: {enabled: true, server_name: $n.domain}}'
+         tls: {enabled: true, server_name: $sni, insecure: ($insecure == 1)}}'
       ;;
     tuic)
-      jq -nc --argjson n "${node}" --arg addr "${addr}" --arg tag "${tag}" '
+      jq -nc --argjson n "${node}" --arg addr "${addr}" --arg tag "${tag}" \
+        --arg sni "${sni}" --argjson insecure "${insecure}" '
         {type: "tuic", tag: $tag, server: $addr, server_port: ($n.port | tonumber),
          uuid: $n.params.uuid, password: $n.params.password,
          congestion_control: ($n.params.congestion_control // "bbr"),
          udp_relay_mode: "native",
-         tls: {enabled: true, server_name: $n.domain, alpn: ["h3"]}}'
+         tls: {enabled: true, server_name: $sni, alpn: ["h3"], insecure: ($insecure == 1)}}'
       ;;
     vmess-ws)
-      jq -nc --argjson n "${node}" --arg addr "${addr}" --arg tag "${tag}" '
+      jq -nc --argjson n "${node}" --arg addr "${addr}" --arg tag "${tag}" \
+        --arg sni "${sni}" --argjson insecure "${insecure}" '
         {type: "vmess", tag: $tag, server: $addr, server_port: ($n.port | tonumber),
          uuid: $n.params.uuid, security: "auto",
-         tls: {enabled: true, server_name: $n.domain, alpn: ["http/1.1"]},
+         tls: {enabled: true, server_name: $sni, alpn: ["http/1.1"], insecure: ($insecure == 1)},
          transport: {type: "ws", path: $n.params.ws_path,
-                     headers: {Host: $n.domain}}}'
+                     headers: {Host: $sni}}}'
       ;;
     *)
       return 1
@@ -226,15 +277,19 @@ share_yaml_quote() {
 }
 
 share_mihomo_proxy() {
-  local node=$1 type addr name
+  local node=$1 type addr sni name skip q_name q_addr q_sni
   type=$(jq -r '.type' <<< "${node}")
   addr=$(share_address "${node}") || return 1
+  sni=$(share_sni "${node}") || return 1
   name=$(jq -r '.name' <<< "${node}")
+  skip='false'
+  if [[ $(share_tls_mode "${node}") == 'selfsigned' ]]; then
+    skip='true'
+  fi
 
-  local q_name q_addr q_domain
   q_name=$(share_yaml_quote "${name}")
   q_addr=$(share_yaml_quote "${addr}")
-  q_domain=$(share_yaml_quote "$(jq -r '.domain // empty' <<< "${node}")")
+  q_sni=$(share_yaml_quote "${sni}")
 
   case ${type} in
     vless-reality)
@@ -251,27 +306,27 @@ share_mihomo_proxy() {
       if [[ $(jq -r '.params.obfs // false' <<< "${node}") == 'true' ]]; then
         obfs=", obfs: salamander, obfs-password: '$(jq -r '.params.obfs_password' <<< "${node}")'"
       fi
-      printf "  - {name: %s, type: hysteria2, server: %s, port: %s, password: '%s', up: '100 Mbps', down: '100 Mbps', sni: %s, skip-cert-verify: false, alpn: [h3]%s}\n" \
-        "${q_name}" "${q_domain}" "$(jq -r '.port' <<< "${node}")" \
-        "$(jq -r '.params.password' <<< "${node}")" "${q_domain}" "${obfs}"
+      printf "  - {name: %s, type: hysteria2, server: %s, port: %s, password: '%s', up: '100 Mbps', down: '100 Mbps', sni: %s, skip-cert-verify: %s, alpn: [h3]%s}\n" \
+        "${q_name}" "${q_addr}" "$(jq -r '.port' <<< "${node}")" \
+        "$(jq -r '.params.password' <<< "${node}")" "${q_sni}" "${skip}" "${obfs}"
       ;;
     anytls)
-      printf "  - {name: %s, type: anytls, server: %s, port: %s, password: '%s', sni: %s, skip-cert-verify: false, client-fingerprint: chrome, udp: true}\n" \
-        "${q_name}" "${q_domain}" "$(jq -r '.port' <<< "${node}")" \
-        "$(jq -r '.params.password' <<< "${node}")" "${q_domain}"
+      printf "  - {name: %s, type: anytls, server: %s, port: %s, password: '%s', sni: %s, skip-cert-verify: %s, client-fingerprint: chrome, udp: true}\n" \
+        "${q_name}" "${q_addr}" "$(jq -r '.port' <<< "${node}")" \
+        "$(jq -r '.params.password' <<< "${node}")" "${q_sni}" "${skip}"
       ;;
     tuic)
-      printf "  - {name: %s, type: tuic, server: %s, port: %s, uuid: '%s', password: '%s', congestion-controller: %s, alpn: [h3], sni: %s, skip-cert-verify: false, udp-relay-mode: native}\n" \
-        "${q_name}" "${q_domain}" "$(jq -r '.port' <<< "${node}")" \
+      printf "  - {name: %s, type: tuic, server: %s, port: %s, uuid: '%s', password: '%s', congestion-controller: %s, alpn: [h3], sni: %s, skip-cert-verify: %s, udp-relay-mode: native}\n" \
+        "${q_name}" "${q_addr}" "$(jq -r '.port' <<< "${node}")" \
         "$(jq -r '.params.uuid' <<< "${node}")" \
         "$(jq -r '.params.password' <<< "${node}")" \
-        "$(jq -r '.params.congestion_control // "bbr"' <<< "${node}")" "${q_domain}"
+        "$(jq -r '.params.congestion_control // "bbr"' <<< "${node}")" "${q_sni}" "${skip}"
       ;;
     vmess-ws)
-      printf "  - {name: %s, type: vmess, server: %s, port: %s, uuid: '%s', alterId: 0, cipher: auto, udp: true, tls: true, servername: %s, network: ws, ws-opts: {path: '%s', headers: {Host: %s}}}\n" \
-        "${q_name}" "${q_domain}" "$(jq -r '.port' <<< "${node}")" \
-        "$(jq -r '.params.uuid' <<< "${node}")" "${q_domain}" \
-        "$(jq -r '.params.ws_path' <<< "${node}")" "${q_domain}"
+      printf "  - {name: %s, type: vmess, server: %s, port: %s, uuid: '%s', alterId: 0, cipher: auto, udp: true, tls: true, servername: %s, skip-cert-verify: %s, network: ws, ws-opts: {path: '%s', headers: {Host: %s}}}\n" \
+        "${q_name}" "${q_addr}" "$(jq -r '.port' <<< "${node}")" \
+        "$(jq -r '.params.uuid' <<< "${node}")" "${q_sni}" "${skip}" \
+        "$(jq -r '.params.ws_path' <<< "${node}")" "${q_sni}"
       ;;
     *)
       return 1
@@ -314,7 +369,7 @@ share_mihomo_yaml() {
 
 # --- Quantumult X（仅 VMess 节点，实验性） ---------------------------------
 share_qx_conf() {
-  local node name count=0
+  local node name count=0 addr sni verify
 
   printf '[general]\n'
   printf 'server_check_url=http://www.gstatic.com/generate_204\n\n'
@@ -327,12 +382,19 @@ share_qx_conf() {
     name=${name// /-}
     name=${name//,/-}
     name=${name//\//-}
-    printf 'vmess=%s:%s, method=none, password=%s, obfs=wss, obfs-host=%s, obfs-uri=%s, tls-verification=true, fast-open=false, udp-relay=false, tag=%s\n' \
-      "$(jq -r '.domain' <<< "${node}")" \
+    addr=$(share_address "${node}")
+    sni=$(share_sni "${node}")
+    verify='true'
+    if [[ $(share_tls_mode "${node}") == 'selfsigned' ]]; then
+      verify='false'
+    fi
+    printf 'vmess=%s:%s, method=none, password=%s, obfs=wss, obfs-host=%s, obfs-uri=%s, tls-verification=%s, fast-open=false, udp-relay=false, tag=%s\n' \
+      "${addr}" \
       "$(jq -r '.port' <<< "${node}")" \
       "$(jq -r '.params.uuid' <<< "${node}")" \
-      "$(jq -r '.domain' <<< "${node}")" \
+      "${sni}" \
       "$(jq -r '.params.ws_path' <<< "${node}")" \
+      "${verify}" \
       "${name}"
     count=$((count + 1))
   done < <(jq -c '.nodes[]' "${SBQD_STATE_FILE}")

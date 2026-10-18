@@ -1,5 +1,7 @@
 # 客户端导入指南
 
+> v2 默认使用 IP 自签证书：客户端必须允许“不安全连接”（Shadowrocket 的“允许不安全”、Mihomo 的 `skip-cert-verify`、sing-box 的 `insecure`）。使用域名证书后无需跳过校验。
+
 ## 1. 能力矩阵
 
 | 客户端 | VLESS Reality | Hysteria2 | TUIC v5 | AnyTLS | VMess WS | 推荐格式 |

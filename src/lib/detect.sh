@@ -139,3 +139,56 @@ detect_summary() {
   printf '%s | %s | %s | %s' \
     "${SBQD_OS_PRETTY}" "${SBQD_ARCH}" "${SBQD_PKG_MGR:-none}" "${SBQD_INIT}"
 }
+
+# --- 多 IP 探测（geto 风格） -----------------------------------------------
+sbqd_is_private_ipv4() {
+  local ip=$1
+  sbqd_is_ipv4 "${ip}" || return 1
+  case ${ip} in
+    10.* | 127.* | 192.168.* | 169.254.* | 0.*) return 0 ;;
+  esac
+  if [[ ${ip} =~ ^172\.(1[6-9]|2[0-9]|3[01])\. ]]; then
+    return 0
+  fi
+  return 1
+}
+
+# 输出本机所有可用公网 IPv4（每行一个），包含多 IP 机器与本机出口 IP
+detect_public_ips() {
+  local -A seen=()
+  local ip
+  if sbqd_has_cmd ip; then
+    while IFS= read -r ip; do
+      [[ -n ${ip} ]] || continue
+      if sbqd_is_private_ipv4 "${ip}"; then
+        continue
+      fi
+      if [[ -n ${seen[${ip}]:-} ]]; then
+        continue
+      fi
+      seen[${ip}]=1
+      printf '%s\n' "${ip}"
+    done < <(ip -4 -o addr show scope global 2> /dev/null | awk '{print $4}' | cut -d/ -f1)
+  fi
+
+  ip=$(detect_public_ipv4) || ip=''
+  if [[ -n ${ip} && -z ${seen[${ip}]:-} ]]; then
+    printf '%s\n' "${ip}"
+  fi
+}
+
+# 没有 IPv4 时回退到 IPv6
+detect_public_ips_or_v6() {
+  local ips
+  ips=$(detect_public_ips)
+  if [[ -n ${ips} ]]; then
+    printf '%s\n' "${ips}"
+    return 0
+  fi
+
+  if sbqd_has_cmd ip; then
+    ip -6 -o addr show scope global 2> /dev/null | awk '{print $4}' | cut -d/ -f1 |
+      grep -v '^fe80' || true
+  fi
+  detect_public_ipv6 || true
+}
